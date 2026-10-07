@@ -12,14 +12,28 @@ import { POST_SOURCE_KINDS } from './posts-kinds.js';
 import { implementedKinds, plannedKinds, postsSourceProvider } from './posts-registry.js';
 import type { ResolvedSource } from './post.js';
 
-/** A source of a given kind, with a target each reader would accept. */
+/**
+ * A target each kind's reader accepts.
+ *
+ * Per kind rather than one generic string, because every reader validates its own target and they
+ * disagree about what a valid one looks like — a Bluesky handle is a domain name, a YouTube handle
+ * is not. Without this, `unusable` would return "bad target" and the assertion below could not tell
+ * that apart from "no reader", which is the thing it is checking.
+ */
+const TARGETS: Readonly<Record<(typeof POST_SOURCE_KINDS)[number], string>> = {
+	feed: 'https://example.com/feed.xml',
+	youtube: '@someone',
+	bluesky: 'someone.bsky.social',
+	twitch: 'someone',
+	tiktok: '@someone'
+};
+
+/** A source of a given kind, with a target its reader would accept. */
 function sourceOf(kind: (typeof POST_SOURCE_KINDS)[number]): ResolvedSource {
 	return {
 		id: 'probe',
 		kind,
-		// A url for `feed`, a handle for the rest. Both are accepted by the reader that gets them,
-		// so a non-null `unusable` here means "no reader" rather than "bad target".
-		target: kind === 'feed' ? 'https://example.com/feed.xml' : '@someone',
+		target: TARGETS[kind],
 		label: 'Probe',
 		platform: null
 	};

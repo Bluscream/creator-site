@@ -15,8 +15,8 @@ configured.
 > **Status: early.** In: the API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`,
 > `/api/posts`), the chat page, the configuration document layer, and the container.
 >
-> Not in: the admin, the links page, the calendar, and three of the five post source kinds —
-> `twitch`, `bluesky` and `tiktok` are configurable but report that they have no reader yet. There
+> Not in: the admin, the links page, the calendar, and two of the five post source kinds — `twitch`
+> and `tiktok` are configurable but report that they have no reader yet. There
 > is no schema in the database and nothing writes to it. Nothing here is deployable as a finished
 > site.
 
@@ -152,8 +152,8 @@ registry maps a kind to the reader for it rather than choosing one
 | --------- | ------------------------------------------------------ | --------------- | --------- |
 | `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built** |
 | `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built** |
+| `bluesky` | the public AppView, unauthenticated                    | nothing         | **built** |
 | `twitch`  | the official Helix API — videos and clips              | two credentials | planned   |
-| `bluesky` | the public AppView, unauthenticated                    | nothing         | planned   |
 | `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | planned   |
 
 There is no single API for "this creator's posts everywhere", and the services that come closest are

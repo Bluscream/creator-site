@@ -3,8 +3,8 @@
  *
  * ### Why an unimplemented kind is a provider rather than a hole
  *
- * Four of the five kinds have no reader yet. Each still answers — with a provider whose `unusable`
- * explains itself — rather than being absent from the map.
+ * Not every kind has a reader yet. The ones that do not still answer — with a provider whose
+ * `unusable` explains itself — rather than being absent from the map.
  *
  * That is the difference between a feed that is honestly incomplete and one that is quietly wrong.
  * A missing entry would mean a configured source silently contributing nothing, which looks
@@ -22,6 +22,7 @@
  * omission: whoever adds one has to either write its reader or say what will.
  */
 
+import { blueskySourceProvider } from './bluesky-source.js';
 import { feedSourceProvider } from './feed-source.js';
 import { youtubeSourceProvider } from './youtube-source.js';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
@@ -31,7 +32,8 @@ import type { PostsSourceProvider } from './posts-source.js';
 /** The kinds that can actually be read, and what reads them. */
 const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = {
 	feed: feedSourceProvider,
-	youtube: youtubeSourceProvider
+	youtube: youtubeSourceProvider,
+	bluesky: blueskySourceProvider
 };
 
 /**
@@ -43,8 +45,6 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
 const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {
 	// Three requests on a cold cache: an app token, the broadcaster's numeric id, then the videos.
 	twitch: 'the official Helix API',
-
-	bluesky: 'the public Bluesky AppView',
 
 	// One unauthenticated request to the page TikTok renders for embedding, which is server-rendered
 	// with the post list already in it.
