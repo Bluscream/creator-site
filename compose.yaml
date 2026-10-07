@@ -1,0 +1,40 @@
+# Running creator-site.
+#
+#     cp .env.example .env     # and fill in what you have
+#     docker compose up -d
+#
+# One service. There is no database container because the database is a file, and no reverse proxy
+# because whoever runs this already has one — putting an opinionated nginx in here would mean
+# fighting it.
+
+services:
+  creator-site:
+    build: .
+    image: ghcr.io/bluscream/creator-site:latest
+    restart: unless-stopped
+
+    # Read from `.env`, which is gitignored. Listed as a file rather than as `environment:` entries
+    # so a credential is never in this file, which is committed.
+    env_file:
+      - .env
+
+    environment:
+      # Fixed by the image: these are paths inside the container, not things an installer chooses.
+      # Where the data lives on the *host* is the volume below.
+      DATA_DIR: /data
+      DATABASE_URL: /data/creator-site.db
+
+    ports:
+      # Host side only on loopback, because this is meant to sit behind a proxy that terminates TLS.
+      # Change to `3000:3000` to expose it directly, and understand that you are then serving plain
+      # HTTP to whatever can reach the host.
+      - '127.0.0.1:3000:3000'
+
+    volumes:
+      # The database, the log and the cache. A named volume rather than a bind mount so it does not
+      # inherit the host's ownership — the container runs as uid 1000 and a bind mount owned by
+      # someone else is the usual reason a first run cannot write.
+      - creator-site-data:/data
+
+volumes:
+  creator-site-data:

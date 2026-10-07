@@ -38,6 +38,21 @@ export default defineConfig({
 			routeStrategies: [{ match: '/api/:path(.*)?', exclude: true }]
 		})
 	],
+	ssr: {
+		// Bundle these into the server build instead of importing them from `node_modules` at
+		// runtime.
+		//
+		// Both are large sets of data — every Lucide glyph, every brand mark in Simple Icons — and
+		// `src/lib/icons.ts` imports 21 of them by name. Left external, the server would `import`
+		// the packages whole at runtime and 56 MB of icon data would have to be installed beside
+		// the build: `lucide` 31 MB and `simple-icons` 25 MB, against a 2.6 MB build. Bundled,
+		// Rollup tree-shakes them down to the 21 that are referenced, and both move to
+		// `devDependencies` because nothing imports them any more once the build exists.
+		//
+		// This is only safe for packages that are pure, side-effect-free data or ESM. Do not add
+		// `better-sqlite3` here — it is a native addon and must stay external.
+		noExternal: ['lucide', 'simple-icons']
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [

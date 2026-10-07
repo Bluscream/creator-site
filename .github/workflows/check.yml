@@ -12,11 +12,6 @@ name: check
 
 on:
   workflow_dispatch:
-    inputs:
-      e2e:
-        description: Also run the Playwright suite
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -24,6 +19,12 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    env:
+      # The build validates the environment schema, and `DATABASE_URL` is the one required
+      # variable. A literal path rather than a secret because nothing here opens the file — the
+      # build only needs the schema to be satisfiable, and a runner has no database to point at.
+      DATABASE_URL: data/creator-site.db
 
     steps:
       - uses: actions/checkout@v5
@@ -36,10 +37,11 @@ jobs:
       - run: npm ci
 
       # One step, not six. `gate` is the same command run locally before anything is claimed to
-      # work, so CI cannot drift from it: format check, strict lint, build, type check, tests.
-      # (The build comes before the type check because Paraglide's messages and SvelteKit's types
-      # do not exist in a fresh checkout, and svelte-check flags every import of them.)
+      # work, so CI cannot drift from it: format check, strict lint, audit, build, type check, and
+      # the tests — unit, browser and Playwright. (The build comes before the type check because
+      # Paraglide's messages and SvelteKit's types do not exist in a fresh checkout, and
+      # svelte-check flags every import of them.)
+      #
+      # There is deliberately no separate e2e step or input: `gate` runs `test`, which runs the
+      # Playwright suite, and an opt-in step on top of that only ran it twice.
       - run: npm run gate
-
-      - if: ${{ inputs.e2e }}
-        run: npm run test:e2e

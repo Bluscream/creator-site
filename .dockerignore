@@ -1,0 +1,28 @@
+# What must never enter the build context.
+#
+# The first two entries are the ones that matter. `.env` holds real credentials and `COPY . .` would
+# put it in a layer — where it stays, readable, even if a later step deletes it. `data/` is somebody's
+# database and log.
+#
+# The rest is speed: `node_modules` is reinstalled in the image anyway, and sending a few hundred
+# megabytes of it to the daemon on every build is time spent for nothing.
+
+.env
+.env.*
+!.env.example
+data
+*.log
+
+node_modules
+.svelte-kit
+build
+test-results
+playwright-report
+
+.git
+.github
+.husky
+.vscode
+.references
+
+README.md

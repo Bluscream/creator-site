@@ -39,6 +39,38 @@ npm run dev
 
 Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same major).
 
+### In a container
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+One service, because the database is a file. There is no database container and no bundled reverse
+proxy — anyone self-hosting this already has one, and an opinionated nginx in `compose.yaml` would
+only be something to fight. The port is published on `127.0.0.1` for that reason; change it in
+`compose.yaml` if you really mean to serve plain HTTP to the network.
+
+Everything persistent — the SQLite file, the log, the feed cache — lives in `/data`, a named volume.
+An upgrade is a new image against the same volume. The container runs as uid 1000 and nothing
+outside `/data` is writable, so the app cannot rewrite its own code.
+
+The image is **255 MB**, and `Dockerfile` records where that number comes from and what was
+rejected. Two things in there are load-bearing and look wrong at a glance:
+
+- Production dependencies install with **`--ignore-scripts`**. The only install script in the
+  production tree is `better-sqlite3`'s `node-gyp rebuild`, and the package ships a prebuilt
+  `linuxmusl-x64` binding. Letting it compile instead means `python3 make g++` in the image — a
+  measured 308 MB, over half the original size, for a compile that is not needed.
+  `src/lib/server/db/index.test.ts` opens a real database and runs real queries, so if a future
+  version stops shipping a usable prebuild, the gate fails rather than someone's server.
+- `lucide` and `simple-icons` are **`devDependencies`**, despite `src/lib/icons.ts` importing from
+  both. `ssr.noExternal` in `vite.config.ts` makes Vite bundle them, so Rollup tree-shakes 56 MB of
+  icon data down to the 21 glyphs actually referenced. `src/dependencies.test.ts` keeps that
+  exemption and the Vite config in step, and otherwise fails on any runtime import of a dev
+  dependency — which is invisible locally and fatal in production, since the runtime image installs
+  `dependencies` only.
+
 ## The gate
 
 `npm run gate` is `svelte-kit sync` → format check → strict lint → `npm audit` → build → type check
