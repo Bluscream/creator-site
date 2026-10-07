@@ -40,8 +40,8 @@ Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same m
 
 ## The gate
 
-`npm run gate` is format check → strict lint → build → type check → tests, in that order, and it is
-what CI runs. One command rather than six, so CI cannot drift from what runs locally. The build
+`npm run gate` is format check → strict lint → `npm audit` → build → type check → tests, in that
+order, and it is what CI runs. One command rather than six, so CI cannot drift from what runs locally. The build
 comes before the type check because Paraglide's messages and SvelteKit's types do not exist in a
 fresh checkout and `svelte-check` flags every import of them.
 
@@ -60,6 +60,15 @@ fresh checkout and `svelte-check` flags every import of them.
 - Config files are type-checked too — `eslint.config.js` and `prettier.config.js` are in
   `tsconfig.json`'s `include`, because a lint config that silently fails to apply a rule is worse
   than not having one.
+
+### Dependency overrides
+
+`package.json` pins `esbuild` to `^0.28` through `overrides`. `drizzle-kit` pulls in the deprecated
+`@esbuild-kit/esm-loader`, which depends on esbuild 0.18 and carries GHSA-67mh-4wv8-2f99. The
+advisory only affects esbuild's dev server, which nothing here runs, and `npm audit fix --force`
+would have downgraded `drizzle-kit` thirteen minor versions — so the transitive dependency is
+forced forward instead. `npm audit` is part of the gate, so this stops being invisible if it ever
+breaks.
 
 ### Suppressions
 

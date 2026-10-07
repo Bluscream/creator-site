@@ -41,7 +41,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
-		"gate": "npm run format:check && npm run lint:code && npm run build && npm run check && npm run test:unit -- --run",
+		"gate": "npm run format:check && npm run lint:code && npm audit --audit-level=moderate && npm run build && npm run check && npm run test:unit -- --run",
 		"format:check": "prettier --check .",
 		"lint:code": "eslint ."
 	},
@@ -81,5 +81,8 @@
 		"vite": "^8.3.0",
 		"vitest": "^4.1.8",
 		"vitest-browser-svelte": "^2.1.1"
+	},
+	"overrides": {
+		"esbuild": "^0.28.0"
 	}
 }
