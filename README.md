@@ -12,9 +12,13 @@ A self-hosted website for content creators. One application, one container, one 
 Every feature is optional and off until it is turned on. The install should be usable before it is
 configured.
 
-> **Status: early.** The API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`) and
-> the chat page are in. The admin, the database, the links page and the feed are not. Nothing here
-> is deployable yet.
+> **Status: early.** In: the API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`,
+> `/api/posts`), the chat page, the configuration document layer, and the container.
+>
+> Not in: the admin, the links page, the calendar, and any post source other than a plain feed —
+> `youtube`, `twitch`, `bluesky` and `tiktok` are configurable but report that they have no reader
+> yet. There is no schema in the database and nothing writes to it. Nothing here is deployable as a
+> finished site.
 
 ## Running it
 
@@ -134,6 +138,48 @@ service behind it is a deployment's choice.
 | `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat             |
 | `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall |
 | `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver               |
+| `posts`    | **configured sources** (below) · an aggregator such as Phyllo or Juicer  |
+
+### Posts are the exception: a second seam, by source kind
+
+The other capabilities have one answer per deployment — there is a single answer to "am I live".
+Posts do not: an installation reads several platforms at once and the point is that a creator mixes
+them. So beneath the capability there is a second seam whose unit is a **source kind**, and the
+registry maps a kind to the reader for it rather than choosing one
+(`src/lib/server/providers/posts-source.ts`).
+
+| kind      | how it is read                                         | needs           | state     |
+| --------- | ------------------------------------------------------ | --------------- | --------- |
+| `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built** |
+| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | planned   |
+| `twitch`  | the official Helix API — videos and clips              | two credentials | planned   |
+| `bluesky` | the public AppView, unauthenticated                    | nothing         | planned   |
+| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | planned   |
+
+There is no single API for "this creator's posts everywhere", and the services that come closest are
+paid, per-seat and want OAuth against each platform — a monthly bill and a credential store for
+something the platforms already publish openly. Each platform is therefore read the cheapest way it
+actually offers.
+
+**Instagram, X and Threads are absent on purpose.** Instagram needs a Business account and app
+review; X removed free API reads. For those the route that does not involve a credit card is a
+feed-manufacturing bridge such as [RSS-Bridge](https://rss-bridge.org), run separately — and because
+a bridge speaks RSS it arrives as an ordinary `feed` source needing no kind of its own. Keeping the
+bridge out of this project is deliberate: its adapters break whenever a platform changes its markup,
+and at arm's length a broken bridge costs one empty tab rather than a release here.
+
+**A kind with no reader yet still answers.** It reports a reason naming what will read it, which
+appears in that source's entry in `/api/posts`. A missing registry entry would instead make a
+configured source contribute nothing — indistinguishable from a platform that has gone quiet. The
+registry's two tables are a partition over every kind, asserted by a test, so adding a kind forces
+the decision rather than allowing the omission.
+
+**Each source is cached separately**, which is the load-bearing decision. YouTube's feed endpoint
+throttles by IP and answers **404 rather than 429**, so an identical request returns 200 once and
+404 twice twenty seconds later. One cache entry for the merged list would let a refresh caught
+mid-throttle replace fifteen good videos with nothing and serve that for the rest of the interval.
+Per-source entries mean a briefly-broken platform keeps showing its last good posts — which is why a
+source can report `ok: false` with a non-zero `count`, and why `age` is the oldest source's.
 
 **One interface per capability, not one per provider.** Owncast can answer "am I live" and nothing
 else; Twitch can do live and chat but knows nothing about donations; Ko-fi knows only donations; a
@@ -166,6 +212,36 @@ exists; machinery for a second one that does not is machinery nobody can check. 
 guarantees is the seam: adding Restream means adding a factory to one array, and nothing outside
 `src/lib/server/providers/` changes. The selection rules are tested against stand-in providers, so
 "prefers the configured one over a merely usable one" is checked even though only Synchra is real.
+
+## Configuration: a file, and reading it never fails
+
+Two kinds of setting, kept apart on purpose.
+
+**Secrets and deployment facts** are environment variables — see `.env.example`, which documents
+every one, and `src/env.ts`, which is the authoritative list and validates them.
+
+**Everything a creator configures** — branding, links, feed sources, chat and calendar settings —
+lives in JSON documents under `<DATA_DIR>/config/`, one per area, each validated by a zod schema
+(`src/lib/server/document.ts`). A file rather than a database table because it is the thing a
+creator edits, diffs and backs up: `git log` on a config file is a history anyone can read, and
+restoring one is a copy rather than a migration. The same schema will generate the admin's form, so
+a field's bounds, its default and its editor control cannot drift from one another.
+
+**Reading a document never fails.** A missing file, a truncated one, a file somebody is halfway
+through hand-editing — each resolves to the schema's defaults for whatever could not be read, and
+says so in the log. That is not leniency for its own sake: the alternative is that a typo in a
+config file takes the public site down, which is the worst possible coupling, because the person who
+can fix it is the one who can no longer load the admin to fix it. Strictness belongs at the write,
+where a mistake can still be reported to whoever is making it.
+
+Two layers do it. The schema defaults or `.catch()`es each field, so **one bad entry costs that
+entry** and the rest keeps working — a half-filled row is a normal state for a file someone is
+editing. Underneath, an unsalvageable document falls back whole.
+
+**The parse is cached on the file's mtime and size**, not on a timer, so an edit takes effect on the
+next request rather than after an arbitrary interval. Size is in the stamp because a coarse
+filesystem clock can give two writes the same mtime, and the admin's atomic save is a `rename` —
+exactly when two writes land close together.
 
 ## Live updates: SSE out, one socket in
 
@@ -360,11 +436,13 @@ choice:
 
 ```
 src/lib/server/              server-only code — the bundler refuses to ship it to the browser
-src/lib/server/providers/    one directory per capability seam; add a provider by adding a factory
+src/lib/server/providers/    the capability seams; add a provider by adding a factory
+src/lib/server/db/           the SQLite connection and the Drizzle schema
 src/lib/components/          Svelte components
 src/lib/                     shared between server and client — domain types live here
 src/routes/                  pages and API routes
 messages/                    translation catalogues, one file per locale (en, de)
+<DATA_DIR>/config/           the creator's configuration documents — not in the repository
 ```
 
 Tests sit beside what they test: `*.test.ts` for Vitest, `*.e2e.ts` for Playwright.
