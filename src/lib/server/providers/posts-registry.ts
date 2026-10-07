@@ -23,13 +23,15 @@
  */
 
 import { feedSourceProvider } from './feed-source.js';
+import { youtubeSourceProvider } from './youtube-source.js';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
 import type { PostSourceKind } from './posts-kinds.js';
 import type { PostsSourceProvider } from './posts-source.js';
 
 /** The kinds that can actually be read, and what reads them. */
 const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = {
-	feed: feedSourceProvider
+	feed: feedSourceProvider,
+	youtube: youtubeSourceProvider
 };
 
 /**
@@ -39,10 +41,6 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
  * coming rather than only what is missing.
  */
 const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {
-	// Reduces to an Atom feed once the handle is resolved to a channel id, which needs a request of
-	// its own — YouTube's feed endpoint takes an id, not a handle.
-	youtube: 'the channel feed YouTube publishes',
-
 	// Three requests on a cold cache: an app token, the broadcaster's numeric id, then the videos.
 	twitch: 'the official Helix API',
 
@@ -82,7 +80,15 @@ export function implementedKinds(): readonly PostSourceKind[] {
 	return POST_SOURCE_KINDS.filter((kind) => READERS[kind] !== undefined);
 }
 
-/** The kinds that are configurable but not yet read, in declaration order. */
+/**
+ * The kinds that are configurable and have a stated plan, in declaration order.
+ *
+ * Read from {@link PLANNED} rather than returned as the complement of {@link READERS}. That
+ * distinction is the whole value of the partition test: a complement covers every kind by
+ * construction, so asserting that the two lists add up would prove nothing. Taken from the table,
+ * a kind added to `POST_SOURCE_KINDS` and then forgotten appears in neither list and the assertion
+ * fails — which is what it is for.
+ */
 export function plannedKinds(): readonly PostSourceKind[] {
-	return POST_SOURCE_KINDS.filter((kind) => READERS[kind] === undefined);
+	return POST_SOURCE_KINDS.filter((kind) => PLANNED[kind] !== undefined);
 }

@@ -102,7 +102,7 @@ interface Outcome {
  * The deadline, the headers and the redirect policy are decided here rather than by each provider,
  * so a provider contributed later cannot quietly opt out of any of them.
  */
-function context(): SourceContext {
+function context(cache: Cache): SourceContext {
 	return {
 		async fetch(url, init) {
 			return fetch(url, {
@@ -112,9 +112,26 @@ function context(): SourceContext {
 				redirect: 'follow',
 				signal: AbortSignal.timeout(TIMEOUT_MS)
 			});
+		},
+
+		store: {
+			async get(key) {
+				// Namespaced, so a provider's keys cannot collide with the per-source post entries
+				// or with another provider's.
+				const entry = await cache.get(`source-store\0${key}`, asText);
+
+				return entry === null ? null : { value: entry.data, age: entry.age };
+			},
+
+			async put(key, value) {
+				await cache.put(`source-store\0${key}`, value);
+			}
 		}
 	};
 }
+
+/** A stored identifier, validated so a cache entry of some other shape reads as a miss. */
+const asText: Parse<string> = (value) => z.string().min(1).parse(value);
 
 /**
  * A rejection as something safe to show an admin.
@@ -164,7 +181,7 @@ async function readSource(source: ResolvedSource, cache: Cache, ttl: number): Pr
 	}
 
 	try {
-		const posts = await provider.read(source, context());
+		const posts = await provider.read(source, context(cache));
 
 		await cache.put(key, posts);
 

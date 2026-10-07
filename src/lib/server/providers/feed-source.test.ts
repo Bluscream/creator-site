@@ -8,10 +8,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { serving } from '#lib/server/fixtures/source-context.js';
 import { feedSourceProvider } from './feed-source.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
-import type { SourceContext } from './posts-source.js';
 
 const source: ResolvedSource = {
 	id: 'blog',
@@ -20,22 +20,6 @@ const source: ResolvedSource = {
 	label: 'Blog',
 	platform: null
 };
-
-/** A context whose fetch answers with a fixed body, so nothing leaves the process. */
-function serving(
-	body: string,
-	init: { status?: number; headers?: Record<string, string> } = {}
-): SourceContext {
-	return {
-		fetch: () =>
-			Promise.resolve(
-				new Response(body, {
-					status: init.status ?? 200,
-					headers: init.headers ?? { 'content-type': 'application/xml' }
-				})
-			)
-	};
-}
 
 const rss = `<?xml version="1.0"?>
 <rss version="2.0"><channel>

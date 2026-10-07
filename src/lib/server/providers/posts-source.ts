@@ -56,6 +56,28 @@ export interface SourceContext {
 		url: string,
 		init?: { readonly headers?: Readonly<Record<string, string>> }
 	): Promise<Response>;
+
+	/**
+	 * A small store for values a provider works out rather than fetches.
+	 *
+	 * Separate from the per-source post cache, which the orchestrator owns. This is for the
+	 * intermediate facts a provider needs first and that cost a request of their own: YouTube's feed
+	 * is addressed by channel id while a person only knows their `@handle`, and Twitch's API wants a
+	 * numeric broadcaster id while a person only knows their login.
+	 *
+	 * Those resolve to values that effectively never change, so caching them separately and for
+	 * much longer than the posts is the difference between one extra request ever and one extra
+	 * request per refresh — against endpoints that already throttle.
+	 *
+	 * Text only, deliberately: everything that belongs here is an identifier. A provider needing
+	 * structured state should say why rather than widening this.
+	 */
+	readonly store: {
+		/** The stored value and how old it is in seconds, or null when there is none. */
+		get(key: string): Promise<{ readonly value: string; readonly age: number } | null>;
+
+		put(key: string, value: string): Promise<void>;
+	};
 }
 
 /** One way of reading a source. */
