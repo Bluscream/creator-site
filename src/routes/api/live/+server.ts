@@ -25,7 +25,10 @@ export const GET: RequestHandler = ({ url }) =>
 /**
  * Anything that is not a GET.
  *
- * SvelteKit answers 405 by itself, in plain text. This keeps the JSON envelope the PHP endpoint
- * returned, so a client can parse every response the same way instead of special-casing one.
+ * Normally unreachable, and kept anyway. SvelteKit's CSRF guard answers every non-GET to any route
+ * with a plain 403 before the route is consulted — verified against a running build, for POST and
+ * PUT, with and without a matching `Origin`. That is the right answer for an endpoint that only
+ * reads, so it is not worked around; this stays as the backstop for the day that guard is
+ * configured differently, and so the method list is declared rather than implied.
  */
 export const fallback: RequestHandler = () => notAllowed();

@@ -42,7 +42,8 @@ export const GET: RequestHandler = ({ request, url }) => {
 /**
  * Anything that is not a GET.
  *
- * `EventSource` only ever issues a GET, so this is for a client doing something else — and it gets
- * the same JSON refusal as every other endpoint rather than SvelteKit's plain-text default.
+ * `EventSource` only ever issues a GET, so this is for a client doing something else. Normally
+ * unreachable: SvelteKit's CSRF guard answers every non-GET with a plain 403 before the route is
+ * consulted. Kept as the backstop, and so the method list is declared rather than implied.
  */
 export const fallback: RequestHandler = () => notAllowed();

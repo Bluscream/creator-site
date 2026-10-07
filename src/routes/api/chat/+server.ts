@@ -22,5 +22,13 @@ export const GET: RequestHandler = ({ url }) =>
 		hasChatProvider()
 	);
 
-/** Anything that is not a GET, with the same JSON envelope as every other response. */
+/**
+ * Anything that is not a GET.
+ *
+ * Normally unreachable, and kept anyway. SvelteKit's CSRF guard answers every non-GET to any route
+ * with a plain 403 before the route is consulted — verified against a running build, for POST and
+ * PUT, with and without a matching `Origin`. That is the right answer for an endpoint that only
+ * reads, so it is not worked around; this stays as the backstop for the day that guard is
+ * configured differently, and so the method list is declared rather than implied.
+ */
 export const fallback: RequestHandler = () => notAllowed();

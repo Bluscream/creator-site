@@ -65,6 +65,7 @@
 		"better-sse": "^0.16.1",
 		"culori": "^4.0.2",
 		"drizzle-orm": "^0.45.2",
+		"feedsmith": "^3.0.1",
 		"pino": "^10.4.0",
 		"proper-lockfile": "^4.1.2",
 		"read-last-lines": "^1.10.0",

@@ -84,16 +84,23 @@ export function sourceCacheKey(source: ResolvedSource): string {
 	return `feed-source\0${source.kind}\0${source.target}`;
 }
 
-/** What a provider hands over: the platform's own values, before any normalising. */
+/**
+ * What a provider hands over: the platform's own values, before any normalising.
+ *
+ * Every optional field accepts `null` *and* `undefined`, which `exactOptionalPropertyTypes` treats
+ * as distinct. Both occur in practice — a parsed feed gives `undefined` for an element that was
+ * absent, and a JSON API gives `null` for a field it has no value for — so insisting on one would
+ * make every provider normalise before it could even hand over.
+ */
 export interface RawPost {
 	/** The platform's own id for this post. Prefixed with the source's id to make it unique. */
 	readonly id: string;
 	readonly url: string | null | undefined;
-	readonly title?: string | null;
-	readonly excerpt?: string | null;
-	readonly image?: string | null;
-	readonly publishedAt?: string | null;
-	readonly author?: string | null;
+	readonly title?: string | null | undefined;
+	readonly excerpt?: string | null | undefined;
+	readonly image?: string | null | undefined;
+	readonly publishedAt?: string | null | undefined;
+	readonly author?: string | null | undefined;
 }
 
 /**
