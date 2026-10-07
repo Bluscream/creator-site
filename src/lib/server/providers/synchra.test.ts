@@ -40,29 +40,31 @@ describe('mapping a chat message', () => {
 		const message = describeMessage(PLAIN_MESSAGE);
 
 		expect(message.id).toBe(PLAIN_MESSAGE.id);
-		expect(message.provider).toBe('twitch');
-		expect(message.viewer).toBe('Ada');
-		expect(message.colour).toBe('#1f8fff');
-		expect(message.avatar).toBe('https://example.invalid/ada.png');
+		expect(message.platform).toBe('twitch');
+		expect(message.author.name).toBe('Ada');
+		expect(message.author.colour).toBe('#1f8fff');
+		expect(message.author.avatarUrl).toBe('https://example.invalid/ada.png');
 		expect(message.text).toBe('first');
 	});
 
 	it('normalises the timestamp to second precision with an explicit zero offset', () => {
 		// The SDK gives `…T13:17:09.482000Z`. The PHP emitted `…T13:17:09+00:00`, and a strict client
 		// comparing strings would notice the difference.
-		expect(describeMessage(PLAIN_MESSAGE).created_at).toBe('2026-10-06T13:17:09+00:00');
+		expect(describeMessage(PLAIN_MESSAGE).at).toBe('2026-10-06T13:17:09+00:00');
 	});
 
 	it('builds a profile link from the handle', () => {
 		// Synchra reports the handle, never the public page, so this is the library building a url.
-		expect(describeMessage(PLAIN_MESSAGE).profile).toBe('https://www.twitch.tv/ada');
+		expect(describeMessage(PLAIN_MESSAGE).author.profileUrl).toBe('https://www.twitch.tv/ada');
 	});
 
-	it('reports an absent colour and an absent avatar as null, not undefined', () => {
+	it('leaves an absent colour and an absent avatar off the actor entirely', () => {
+		// Absent rather than null: `exactOptionalPropertyTypes` makes those different values, and a
+		// renderer's `?? fallback` reads the same either way while a key-for-key comparison does not.
 		const message = describeMessage(EMOTE_MESSAGE);
 
-		expect(message.colour).toBeNull();
-		expect(message.avatar).toBeNull();
+		expect(message.author).not.toHaveProperty('colour');
+		expect(message.author).not.toHaveProperty('avatarUrl');
 	});
 
 	it('resolves an emote to its image instead of its name', () => {
@@ -78,7 +80,7 @@ describe('mapping a chat message', () => {
 	});
 
 	it('resolves the viewer badges', () => {
-		const badges = describeMessage(EMOTE_MESSAGE).badges;
+		const badges = describeMessage(EMOTE_MESSAGE).author.badges ?? [];
 
 		expect(badges).toHaveLength(1);
 		expect(badges[0]).toMatchObject({ name: 'Subscriber', type: 'subscriber' });
@@ -91,18 +93,23 @@ describe('mapping a chat message', () => {
 		// of the messages on a busy TikTok stream.
 		const message = describeMessage(NOTICE_MESSAGE);
 
-		expect(message.notice).toBe(true);
-		expect(message.kind).toBe('tiktok_gift');
+		expect(message.notice).toBe('tiktok_gift');
 		expect(message.text).not.toBe('');
 		expect(message.parts.length).toBeGreaterThan(0);
 		expect(message.parts.some((part) => part.kind === 'gift')).toBe(true);
 	});
 
-	it('marks an ordinary message as not a notice and gives it no kind', () => {
-		const message = describeMessage(PLAIN_MESSAGE);
+	it('leaves an ordinary message with no notice at all', () => {
+		expect(describeMessage(PLAIN_MESSAGE).notice).toBeNull();
+	});
 
-		expect(message.notice).toBe(false);
-		expect(message.kind).toBeNull();
+	it('still reads as a notice when the gateway does not name the kind', () => {
+		// `notice` is one nullable string now, so "there is an event" and "which event" cannot
+		// disagree — but a notice whose `sub_type` is missing must not thereby become an ordinary
+		// message, which is what the fallback kind is for.
+		const message = describeMessage({ ...NOTICE_MESSAGE, sub_type: null });
+
+		expect(message.notice).toBe('notice');
 	});
 });
 
@@ -170,7 +177,7 @@ describe('mapping a page of chat', () => {
 		// Stated as the property rather than as the sequence, so the test still means something if
 		// the fixtures are reordered.
 		const times = describeChatPage(newestFirst).messages.map((message) =>
-			Date.parse(message.created_at)
+			Date.parse(message.at ?? '')
 		);
 
 		expect(times).toEqual([...times].sort((a, b) => a - b));
@@ -197,11 +204,11 @@ describe('mapping a support event', () => {
 		const entry = describeActivity(DONATION);
 
 		expect(entry.id).toBe(DONATION.id);
-		expect(entry.provider).toBe('twitch');
+		expect(entry.platform).toBe('twitch');
 		expect(entry.type).toBe('charity_donation');
 		expect(entry.type_label).toBe('Donation');
 		expect(entry.group).toBe('donation');
-		expect(entry.viewer).toBe('Ada');
+		expect(entry.actor.name).toBe('Ada');
 		expect(entry.count_name).toBe('euro');
 		expect(entry.system_message).toBe('Ada donated €5.00');
 	});
@@ -249,12 +256,12 @@ describe('mapping a support event', () => {
 		expect(entry.message_parts).toHaveLength(0);
 	});
 
-	it('reports an absent avatar as null', () => {
-		expect(describeActivity(GIFT).avatar).toBeNull();
+	it('leaves an absent avatar off the actor', () => {
+		expect(describeActivity(GIFT).actor).not.toHaveProperty('avatarUrl');
 	});
 
 	it('normalises the timestamp the same way chat does', () => {
-		expect(describeActivity(GIFT).created_at).toBe('2026-10-06T13:20:00+00:00');
+		expect(describeActivity(GIFT).at).toBe('2026-10-06T13:20:00+00:00');
 	});
 });
 
@@ -268,12 +275,55 @@ describe('matching the PHP response shape', () => {
 	/** Every key the mapper produces, including the ones whose value is null. */
 	const keysOf = (value: object): string[] => Object.keys(value).sort();
 
-	it('produces exactly the message keys the PHP did', () => {
-		expect(keysOf(describeMessage(PLAIN_MESSAGE))).toEqual(phpKeys.chat.message);
+	/**
+	 * How a chat message's keys differ from the recorded PHP, and why.
+	 *
+	 * The canonical layer renamed these deliberately: `provider` → `platform` because posts and
+	 * linked accounts already called it that, `created_at` → `at` for the same reason, and the five
+	 * fields describing one person into a single `author`. The PHP recording is left as it was — it
+	 * is a recording — so the divergence is stated here instead, which keeps an *accidental* change
+	 * to the response shape a failing test while an intentional one has to be written down.
+	 *
+	 * The cutover consequence, noted in `.references/NODE_REWRITE.md`: the chat overlay's url moves
+	 * to the Node route together with the page that reads it, not independently of it.
+	 */
+	const MESSAGE_RENAMES = {
+		gone: ['avatar', 'badges', 'colour', 'created_at', 'kind', 'profile', 'provider', 'viewer'],
+		added: ['at', 'author', 'platform', 'source']
+	};
+
+	const ACTIVITY_RENAMES = {
+		gone: ['avatar', 'created_at', 'provider', 'viewer'],
+		added: ['actor', 'at', 'platform', 'source']
+	};
+
+	/** What is in `keys` and not in `against`. */
+	const missing = (keys: readonly string[], against: readonly string[]): string[] =>
+		keys.filter((key) => !against.includes(key)).sort();
+
+	it('diverges from the PHP message keys only where the canonical layer says so', () => {
+		const keys = keysOf(describeMessage(PLAIN_MESSAGE));
+
+		expect(missing(phpKeys.chat.message, keys)).toEqual(MESSAGE_RENAMES.gone);
+		expect(missing(keys, phpKeys.chat.message)).toEqual(MESSAGE_RENAMES.added);
 	});
 
-	it('produces exactly the activity keys the PHP did', () => {
-		expect(keysOf(describeActivity(DONATION))).toEqual(phpKeys.activity.entry);
+	it('diverges from the PHP activity keys only where the canonical layer says so', () => {
+		const keys = keysOf(describeActivity(DONATION));
+
+		expect(missing(phpKeys.activity.entry, keys)).toEqual(ACTIVITY_RENAMES.gone);
+		expect(missing(keys, phpKeys.activity.entry)).toEqual(ACTIVITY_RENAMES.added);
+	});
+
+	it('describes one person once, in the shape a post uses for its author', () => {
+		// The point of the rename: five sibling fields became one actor, and it is the same actor
+		// type a post carries — which is why there is one avatar component rather than two.
+		expect(keysOf(describeMessage(PLAIN_MESSAGE).author)).toEqual([
+			'avatarUrl',
+			'colour',
+			'name',
+			'profileUrl'
+		]);
 	});
 
 	it('produces segment keys the PHP also produced', () => {
@@ -298,7 +348,7 @@ describe('matching the PHP response shape', () => {
 	});
 
 	it('produces exactly the badge keys the PHP did', () => {
-		const badge = describeMessage(EMOTE_MESSAGE).badges[0];
+		const badge = describeMessage(EMOTE_MESSAGE).author.badges?.[0];
 
 		expect(badge).toBeDefined();
 		expect(keysOf(badge as object)).toEqual(phpKeys.chat.badge);

@@ -20,7 +20,7 @@
  */
 
 import type { ActivityEntry } from '#lib/activity.js';
-import type { ChatMessage } from '#lib/chat.js';
+import type { Utterance } from '#lib/chat.js';
 import type { PlatformState } from '#lib/live.js';
 
 /** The streams a browser can subscribe to. */
@@ -44,7 +44,7 @@ export type EventAction = (typeof EVENT_ACTIONS)[number];
 export interface ChatEvent {
 	readonly topic: 'chat';
 	readonly action: EventAction;
-	readonly message: ChatMessage;
+	readonly message: Utterance;
 }
 
 /** Someone supported the channel. */

@@ -23,51 +23,45 @@ import type { Page } from '@playwright/test';
 
 const MESSAGE = {
 	id: 'm1',
-	provider: 'twitch',
-	viewer: 'Ada',
-	colour: '#1f8fff',
-	avatar: null,
-	profile: 'https://www.twitch.tv/ada',
+	platform: 'twitch',
+	source: null,
+	at: '2026-10-06T13:00:00+00:00',
+	author: { name: 'Ada', colour: '#1f8fff', profileUrl: 'https://www.twitch.tv/ada' },
 	text: 'first message',
 	parts: [{ kind: 'text', text: 'first message' }],
-	badges: [],
-	notice: false,
-	kind: null,
-	created_at: '2026-10-06T13:00:00+00:00'
+	notice: null
 };
 
 const NOTICE = {
 	...MESSAGE,
 	id: 'm2',
-	provider: 'tiktok',
-	viewer: 'Linus',
-	profile: null,
+	platform: 'tiktok',
+	at: '2026-10-06T13:00:01+00:00',
+	author: { name: 'Linus' },
 	text: 'sent Rose',
 	parts: [
 		{ kind: 'text', text: 'sent ' },
 		{ kind: 'gift', text: 'Rose' }
 	],
-	notice: true,
-	kind: 'tiktok_gift',
-	created_at: '2026-10-06T13:00:01+00:00'
+	notice: 'tiktok_gift'
 };
 
 const DONATION = {
 	id: 'a1',
-	provider: 'twitch',
+	platform: 'twitch',
+	source: null,
+	at: '2026-10-06T13:00:02+00:00',
 	type: 'charity_donation',
 	type_label: 'Donation',
 	group: 'donation',
-	viewer: 'Grace',
-	avatar: null,
+	actor: { name: 'Grace' },
 	amount: 5,
 	currency: 'EUR',
 	count_name: 'euro',
 	message: 'keep it up',
 	message_parts: [{ kind: 'text', text: 'keep it up' }],
 	system_message: 'Grace donated €5.00',
-	colour: '#1f8fff',
-	created_at: '2026-10-06T13:00:02+00:00'
+	colour: '#1f8fff'
 };
 
 /**
@@ -371,7 +365,7 @@ test('darkens a bright viewer colour on a light page', async ({ page }) => {
 			configured: true,
 			available: true,
 			reason: null,
-			messages: [{ ...MESSAGE, colour: '#53fc19' }],
+			messages: [{ ...MESSAGE, author: { ...MESSAGE.author, colour: '#53fc19' } }],
 			age: 0,
 			stale: false,
 			generated_at: '2026-10-06T13:00:03+00:00'

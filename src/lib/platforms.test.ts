@@ -242,14 +242,14 @@ describe('the emitted custom properties', () => {
 
 	it('emits a rule for every platform that has a colour', () => {
 		for (const entry of all.filter((candidate) => candidate.primary !== null)) {
-			expect(css, `${entry.key} has no rule`).toContain(`[data-provider="${entry.key}"]`);
+			expect(css, `${entry.key} has no rule`).toContain(`[data-platform="${entry.key}"]`);
 		}
 	});
 
 	it('publishes all three properties per rule', () => {
-		expect(css).toContain('--provider:');
-		expect(css).toContain('--provider-ink:');
-		expect(css).toContain('--provider-ink-light:');
+		expect(css).toContain('--platform:');
+		expect(css).toContain('--platform-ink:');
+		expect(css).toContain('--platform-ink-light:');
 	});
 
 	it('is a stylesheet and nothing else', () => {
@@ -266,6 +266,6 @@ describe('the emitted custom properties', () => {
 		// `requireAssertions` exists to catch. A count covers both directions and always runs.
 		const coloured = all.filter((entry) => entry.primary !== null).length;
 
-		expect(css.match(/\[data-provider=/g)?.length ?? 0).toBe(coloured);
+		expect(css.match(/\[data-platform=/g)?.length ?? 0).toBe(coloured);
 	});
 });

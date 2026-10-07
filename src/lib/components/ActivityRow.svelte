@@ -44,7 +44,7 @@
 
 	/** "Ada — €5.00", "Linus — 3 diamonds", "Grace — Follow". */
 	const headline = $derived.by(() => {
-		const who = entry.viewer;
+		const who = entry.actor.name;
 
 		if (entry.currency !== null)
 			return `${who} — ${money(entry.amount, entry.currency, getLocale())}`;
@@ -59,14 +59,14 @@
 	const hasMessage = $derived(entry.message !== '' || entry.message_parts.length > 0);
 
 	/** The platform's reading colour, from the registry. See the note in `ChatRow.svelte`. */
-	const tint = $derived(lookupPlatform(entry.provider)?.tint ?? null);
+	const tint = $derived(lookupPlatform(entry.platform)?.tint ?? null);
 </script>
 
-<div class="row" data-provider={entry.provider} data-type={entry.type} style:--provider-ink={tint}>
+<div class="row" data-platform={entry.platform} data-type={entry.type} style:--platform-ink={tint}>
 	<div class="content">
 		{#if platform}
 			<span class="platform">
-				<Icon name={iconFor({ platform: entry.provider })} size={13} />
+				<Icon name={iconFor({ platform: entry.platform ?? undefined })} size={13} />
 			</span>
 		{/if}
 
@@ -83,8 +83,8 @@
 <style>
 	.row {
 		padding: 0.3em 0.35em;
-		border-inline-start: 3px solid var(--provider-ink, var(--accent, #6ea8fe));
-		background: color-mix(in oklab, var(--provider-ink, #6ea8fe) 10%, transparent);
+		border-inline-start: 3px solid var(--platform-ink, var(--accent, #6ea8fe));
+		background: color-mix(in oklab, var(--platform-ink, #6ea8fe) 10%, transparent);
 		border-radius: 0.25em;
 		overflow-wrap: anywhere;
 	}
@@ -94,7 +94,7 @@
 	}
 
 	.platform {
-		color: var(--provider-ink, currentColor);
+		color: var(--platform-ink, currentColor);
 		margin-inline-end: 0.25em;
 	}
 

@@ -10,12 +10,16 @@
  * than growing a cursor: it only ever has to cover the last few seconds.
  */
 
-import type { MessageSegment } from '#lib/chat.js';
+import type { Actor, Entity, Segment } from '#lib/canonical.js';
 
-/** One support event. */
-export interface ActivityEntry {
-	readonly id: string;
-	readonly provider: string;
+/**
+ * One support event.
+ *
+ * An {@link Entity}, so `id`, `platform`, `source` and `at` mean here exactly what they mean on a
+ * post and on a chat message — a toast and a chat row can therefore share the platform icon, the
+ * timestamp formatting and the already-seen bookkeeping.
+ */
+export interface ActivityEntry extends Entity {
 	/** The specific event, e.g. `tiktok_gift`, `sub_gift`, `kofi_donation`. */
 	readonly type: string;
 	/** The same thing as the platform words it, for display. */
@@ -27,8 +31,15 @@ export interface ActivityEntry {
 	 * than on {@link type}, of which there are several dozen.
 	 */
 	readonly group: string | null;
-	readonly viewer: string;
-	readonly avatar: string | null;
+	/**
+	 * Who sent it.
+	 *
+	 * The same {@link Actor} a chat row names, rather than a `viewer` string beside an `avatar` url.
+	 * Required: a support event with no supporter is not one — an anonymous donation still has a name
+	 * to show, which is whatever the provider calls anonymous.
+	 */
+	readonly actor: Actor;
+
 	/**
 	 * How much, already scaled out of minor units.
 	 *
@@ -43,7 +54,7 @@ export interface ActivityEntry {
 	/** The viewer's attached message as plain text. Empty when they sent none. */
 	readonly message: string;
 	/** The same message resolved into drawable pieces, so a toast can show its emotes. */
-	readonly message_parts: readonly MessageSegment[];
+	readonly message_parts: readonly Segment[];
 	/** The provider's own phrasing of the event, e.g. "X sent Heart Me". */
 	readonly system_message: string;
 	/**
@@ -54,8 +65,6 @@ export interface ActivityEntry {
 	 * parsing it.
 	 */
 	readonly colour: string | null;
-	/** ISO 8601 at second precision with an explicit zero offset. */
-	readonly created_at: string;
 }
 
 /**

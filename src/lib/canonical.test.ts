@@ -271,7 +271,7 @@ describe('the declared vocabularies', () => {
 	});
 
 	it('names the segment kinds', () => {
-		expect(SEGMENT_KINDS).toStrictEqual(['text', 'emote', 'link', 'mention']);
+		expect(SEGMENT_KINDS).toStrictEqual(['text', 'emote', 'gift', 'mention', 'link']);
 	});
 
 	it('has an escape hatch for a kind nothing else describes', () => {

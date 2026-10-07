@@ -295,7 +295,7 @@ export function nameFor(entry: LinkEntry, fallback = ''): string {
  * The per-platform custom properties, one rule per platform, for the page to inline.
  *
  * ```css
- * [data-provider="twitch"]{--provider:#9146ff;--provider-ink:#a970ff;--provider-ink-light:#7c3aed}
+ * [data-platform="twitch"]{--platform:#9146ff;--platform-ink:#a970ff;--platform-ink-light:#7c3aed}
  * ```
  *
  * Emitted rather than written into a stylesheet because the colours were otherwise repeated at
@@ -309,9 +309,9 @@ export function platformCss(): string {
 		.filter((entry) => entry.primary !== null)
 		.map(
 			(entry) =>
-				`[data-provider="${entry.key}"]{--provider:${entry.primary ?? ''};` +
-				`--provider-ink:${entry.tint ?? entry.primary ?? ''};` +
-				`--provider-ink-light:${entry.tintLight ?? entry.primary ?? ''}}`
+				`[data-platform="${entry.key}"]{--platform:${entry.primary ?? ''};` +
+				`--platform-ink:${entry.tint ?? entry.primary ?? ''};` +
+				`--platform-ink-light:${entry.tintLight ?? entry.primary ?? ''}}`
 		)
 		.join('');
 }

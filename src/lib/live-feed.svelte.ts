@@ -31,13 +31,13 @@
 
 import { browser } from '$app/env';
 import type { ActivityEntry } from '#lib/activity.js';
-import type { ChatMessage, ChatResult } from '#lib/chat.js';
+import type { ChatResult, Utterance } from '#lib/chat.js';
 import type { ActivityResult } from '#lib/activity.js';
 import type { SiteEvent, Topic } from '#lib/events.js';
 
 /** What a feed exposes to a page. */
 export interface LiveFeed {
-	readonly messages: readonly ChatMessage[];
+	readonly messages: readonly Utterance[];
 	readonly activity: readonly ActivityEntry[];
 	/** False while the first fetch is in flight, so a page can tell "empty" from "not yet". */
 	readonly ready: boolean;
@@ -85,7 +85,7 @@ export function liveFeed(options: LiveFeedOptions = {}): LiveFeed {
 	const topics =
 		options.topics ?? (wantsEvents ? (['chat', 'activity'] as const) : (['chat'] as const));
 
-	let messages = $state<readonly ChatMessage[]>([]);
+	let messages = $state<readonly Utterance[]>([]);
 	let activity = $state<readonly ActivityEntry[]>([]);
 	let ready = $state(false);
 	let unavailable = $state(false);
@@ -100,9 +100,9 @@ export function liveFeed(options: LiveFeedOptions = {}): LiveFeed {
 	 * By `id`, so the overlap between the backlog and the stream costs a replacement rather than a
 	 * duplicate — and so an edited message updates in place instead of appearing twice.
 	 */
-	function upsertMessage(message: ChatMessage): void {
+	function upsertMessage(message: Utterance): void {
 		const without = messages.filter((existing) => existing.id !== message.id);
-		const merged = [...without, message].sort((a, b) => a.created_at.localeCompare(b.created_at));
+		const merged = [...without, message].sort((a, b) => oldestFirst(a.at, b.at));
 
 		messages = merged.slice(-limit);
 	}
@@ -113,7 +113,7 @@ export function liveFeed(options: LiveFeedOptions = {}): LiveFeed {
 
 	function upsertActivity(entry: ActivityEntry): void {
 		const without = activity.filter((existing) => existing.id !== entry.id);
-		const merged = [...without, entry].sort((a, b) => a.created_at.localeCompare(b.created_at));
+		const merged = [...without, entry].sort((a, b) => oldestFirst(a.at, b.at));
 
 		activity = merged.slice(-limit);
 	}
@@ -228,19 +228,30 @@ export function liveFeed(options: LiveFeedOptions = {}): LiveFeed {
  * Merging in the feed would make the second two filter a list that had already been built.
  */
 export type FeedRow =
-	| { readonly kind: 'message'; readonly at: string; readonly message: ChatMessage }
+	| { readonly kind: 'message'; readonly at: string; readonly message: Utterance }
 	| { readonly kind: 'activity'; readonly at: string; readonly entry: ActivityEntry };
 
 export function interleave(
-	messages: readonly ChatMessage[],
+	messages: readonly Utterance[],
 	activity: readonly ActivityEntry[]
 ): readonly FeedRow[] {
 	const rows: FeedRow[] = [
-		...messages.map((message) => ({ kind: 'message' as const, at: message.created_at, message })),
-		...activity.map((entry) => ({ kind: 'activity' as const, at: entry.created_at, entry }))
+		...messages.map((message) => ({ kind: 'message' as const, at: message.at ?? '', message })),
+		...activity.map((entry) => ({ kind: 'activity' as const, at: entry.at ?? '', entry }))
 	];
 
-	// `localeCompare` on an ISO 8601 string at a fixed offset is a lexical comparison that happens
-	// to be chronological, which is why `atom()` normalises every timestamp to exactly that shape.
-	return rows.sort((a, b) => a.at.localeCompare(b.at));
+	return rows.sort((a, b) => oldestFirst(a.at, b.at));
+}
+
+/**
+ * Two canonical timestamps, oldest first.
+ *
+ * `localeCompare` on an ISO 8601 string at a fixed offset is a lexical comparison that happens to be
+ * chronological, which is why `atom()` normalises every timestamp to exactly that shape. An undated
+ * entity sorts to the top as the oldest: the canonical `at` is nullable because plenty of feeds omit
+ * a date, and a chat gateway that stopped sending one should leave a row in the log rather than
+ * reordering it to the bottom every refresh.
+ */
+function oldestFirst(a: string | null, b: string | null): number {
+	return (a ?? '').localeCompare(b ?? '');
 }

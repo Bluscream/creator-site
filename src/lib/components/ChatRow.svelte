@@ -19,15 +19,15 @@
 	is left if the image never loads. Only when there *is* an image: see `needsNoticeLabel`.
 -->
 <script lang="ts">
-	import type { ChatMessage } from '#lib/chat.js';
+	import type { Utterance } from '#lib/chat.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import MessageSegments from '#lib/components/MessageSegments.svelte';
-	import ViewerAvatar from '#lib/components/ViewerAvatar.svelte';
+	import ActorAvatar from '#lib/components/ActorAvatar.svelte';
 	import { TEXT_CONTRAST, isHexColor, onLight } from '#lib/color.js';
 	import { iconFor, platform as lookupPlatform } from '#lib/platforms.js';
 
 	interface Props {
-		message: ChatMessage;
+		message: Utterance;
 		avatars?: boolean;
 		badges?: boolean;
 		platform?: boolean;
@@ -35,14 +35,21 @@
 
 	let { message, avatars = true, badges = true, platform = true }: Props = $props();
 
+	const actor = $derived(message.author);
+
 	const profile = $derived(
-		message.profile !== null && /^https?:\/\//.test(message.profile) ? message.profile : null
+		actor.profileUrl !== undefined && /^https?:\/\//.test(actor.profileUrl)
+			? actor.profileUrl
+			: null
 	);
+
+	/** The speaker's badges, or none: a platform that has no badges at all omits the field. */
+	const actorBadges = $derived(actor.badges ?? []);
 
 	/**
 	 * The platform's reading colour, set as a custom property on this row.
 	 *
-	 * The PHP emitted one `[data-provider]` CSS rule per platform and inlined the lot into every
+	 * The PHP emitted one `[data-platform]` CSS rule per platform and inlined the lot into every
 	 * page. A row can simply ask the registry for its own, which means no generated stylesheet, no
 	 * `{@html}` to inject it with, and no rules shipped for platforms this creator does not use.
 	 *
@@ -53,7 +60,7 @@
 	 * Null for a platform with no colour recorded, which leaves the mark in the surrounding ink
 	 * rather than in a colour nobody chose.
 	 */
-	const tint = $derived(lookupPlatform(message.provider)?.tint ?? null);
+	const tint = $derived(lookupPlatform(message.platform)?.tint ?? null);
 
 	/**
 	 * The viewer's own chat colour, in a form that reads on either theme.
@@ -69,7 +76,7 @@
 	 * A colour that is not a plain hex is dropped rather than passed through. Synchra sends
 	 * `#rrggbb`, but this value originates with a third party and ends up in a style attribute.
 	 */
-	const viewerColour = $derived(isHexColor(message.colour) ? message.colour : null);
+	const viewerColour = $derived(isHexColor(actor.colour ?? null) ? (actor.colour ?? null) : null);
 	const viewerColourLight = $derived(
 		viewerColour === null ? null : onLight(viewerColour, TEXT_CONTRAST)
 	);
@@ -85,7 +92,7 @@
 	 * this kind of thing is ever found.
 	 */
 	const needsNoticeLabel = $derived(
-		message.notice &&
+		message.notice !== null &&
 			message.text !== '' &&
 			message.parts.some((part) => part.imageUrl !== undefined)
 	);
@@ -93,28 +100,28 @@
 
 <div
 	class="row"
-	class:notice={message.notice}
-	data-provider={message.provider}
-	data-kind={message.kind}
-	style:--provider-ink={tint}
+	class:notice={message.notice !== null}
+	data-platform={message.platform}
+	data-kind={message.notice}
+	style:--platform-ink={tint}
 	style:--viewer-ink={viewerColour}
 	style:--viewer-ink-light={viewerColourLight}
 >
 	{#if avatars}
 		<!-- The checked colour, not the raw one: the stand-in disc's letter is text too. -->
-		<ViewerAvatar name={message.viewer} src={message.avatar} colour={viewerColour} />
+		<ActorAvatar {actor} colour={viewerColour} />
 	{/if}
 
 	<div class="content">
 		{#if platform}
 			<span class="platform">
-				<Icon name={iconFor({ platform: message.provider })} size={13} />
+				<Icon name={iconFor({ platform: message.platform ?? undefined })} size={13} />
 			</span>
 		{/if}
 
-		{#if badges && message.badges.length > 0}
+		{#if badges && actorBadges.length > 0}
 			<span class="badges">
-				{#each message.badges as badge, index (index)}
+				{#each actorBadges as badge, index (index)}
 					{#if badge.imageUrl !== undefined}
 						<img
 							class="badge"
@@ -130,10 +137,10 @@
 		{/if}
 
 		{#if profile === null}
-			<span class="author">{message.viewer}</span>
+			<span class="author">{actor.name}</span>
 		{:else}
 			<a class="author" href={profile} target="_blank" rel="noopener noreferrer" title={profile}>
-				{message.viewer}
+				{actor.name}
 			</a>
 		{/if}
 
@@ -169,10 +176,10 @@
 	}
 
 	.platform {
-		/* `--provider-ink` is set on the row above, from the registry. No brand colour is written
+		/* `--platform-ink` is set on the row above, from the registry. No brand colour is written
 		   here, and a platform with none recorded falls through to the surrounding ink rather than
 		   to a colour nobody chose. */
-		color: var(--provider-ink, currentColor);
+		color: var(--platform-ink, currentColor);
 		margin-inline-end: 0.25em;
 	}
 

@@ -17,10 +17,10 @@
 	  in that position is the whole reason the check exists.
 -->
 <script lang="ts">
-	import type { MessageSegment } from '#lib/chat.js';
+	import type { Segment } from '#lib/chat.js';
 
 	interface Props {
-		segments: readonly MessageSegment[];
+		segments: readonly Segment[];
 		/** The plain-text fallback, for a message that arrived with no resolved segments. */
 		text?: string;
 	}

@@ -10,41 +10,37 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ActivityEntry } from '#lib/activity.js';
-import type { ChatMessage } from '#lib/chat.js';
+import type { Utterance } from '#lib/chat.js';
 import { interleave } from '#lib/live-feed.svelte.js';
 
 /** A message, with only the fields the ordering depends on filled in meaningfully. */
-const message = (id: string, at: string): ChatMessage => ({
+const message = (id: string, at: string): Utterance => ({
 	id,
-	provider: 'twitch',
-	viewer: 'Ada',
-	colour: null,
-	avatar: null,
-	profile: null,
+	platform: 'twitch',
+	source: null,
+	at,
+	author: { name: 'Ada' },
 	text: id,
 	parts: [],
-	badges: [],
-	notice: false,
-	kind: null,
-	created_at: at
+	notice: null
 });
 
 const entry = (id: string, at: string): ActivityEntry => ({
 	id,
-	provider: 'twitch',
+	platform: 'twitch',
+	source: null,
+	at,
 	type: 'charity_donation',
 	type_label: 'Donation',
 	group: 'donation',
-	viewer: 'Grace',
-	avatar: null,
+	actor: { name: 'Grace' },
 	amount: 5,
 	currency: 'EUR',
 	count_name: 'euro',
 	message: '',
 	message_parts: [],
 	system_message: '',
-	colour: null,
-	created_at: at
+	colour: null
 });
 
 const idsOf = (rows: ReturnType<typeof interleave>): string[] =>

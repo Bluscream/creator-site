@@ -36,7 +36,7 @@ import type {
 import { NO_ACTIVITY } from '#lib/activity.js';
 import type { Activity, ActivityEntry } from '#lib/activity.js';
 import { NO_CHAT } from '#lib/chat.js';
-import type { Chat, ChatMessage } from '#lib/chat.js';
+import type { Chat, Utterance } from '#lib/chat.js';
 import type { EventAction, SiteEvent } from '#lib/events.js';
 import { atom, offlinePlatform, watchUrl } from '#lib/live.js';
 import type { LiveStatus, PlatformState } from '#lib/live.js';
@@ -262,29 +262,48 @@ export function describeChatPage(records: readonly SynchraChatMessage[]): Chat {
  * admin edits, so it belongs with the admin and the database rather than here, and is not ported
  * yet. TikTok, which is where most of the traffic comes from, already sends a picture.
  */
-export function describeMessage(message: SynchraChatMessage): ChatMessage {
+export function describeMessage(message: SynchraChatMessage): Utterance {
 	// A notice — a gift, a sub, a raid — leaves `message_parts` empty and puts its content in
 	// `notice_message_parts`, so reading only the former renders every one of them as a blank row.
 	// `contentParts` is the library's answer to that, and it is why this does not index the fields
 	// directly.
 	const parts = MessageContent.contentParts(message);
 
+	const badges = MessageContent.badges(message.badges);
+
 	return {
 		id: message.id,
-		provider: message.provider,
-		viewer: message.viewer_display_name,
-		colour: message.viewer_color,
-		avatar: message.viewer_profile_picture_url,
-		// Synchra knows the handle, not the public page, so the library builds the url — undefined
-		// for a platform with no public profile, which this project reports as null.
-		profile: profileUrl(message) ?? null,
+		platform: message.provider,
+		// Synchra is one gateway in front of every platform, so there is no per-platform source here
+		// to name: the platform *is* what a reader filters on.
+		source: null,
+		at: requiredAtom(message.created_at),
+		author: {
+			name: message.viewer_display_name,
+			...optional('colour', message.viewer_color),
+			...optional('avatarUrl', message.viewer_profile_picture_url),
+			// Synchra knows the handle, not the public page, so the library builds the url — undefined
+			// for a platform with no public profile, which is simply an absent field here.
+			...optional('profileUrl', profileUrl(message)),
+			...(badges.length === 0 ? {} : { badges })
+		},
 		text: MessageContent.plainText(parts),
 		parts: MessageContent.segments(parts),
-		badges: MessageContent.badges(message.badges),
-		notice: MessageContent.isNotice(message),
-		kind: message.sub_type,
-		created_at: requiredAtom(message.created_at)
+		// One nullable string rather than a boolean beside a kind. `sub_type` is what the notice is;
+		// `isNotice` is whether there is one — and a notice whose kind the gateway does not name still
+		// has to read as a notice, which is what the fallback is for.
+		notice: MessageContent.isNotice(message) ? (message.sub_type ?? 'notice') : null
 	};
+}
+
+/**
+ * One field, or nothing at all.
+ *
+ * `exactOptionalPropertyTypes` distinguishes "absent" from "present and undefined", and these values
+ * are compared in fixture tests and serialised into an API response, where the difference shows.
+ */
+function optional<K extends string, V>(key: K, value: V | null | undefined): Record<K, V> | object {
+	return value === null || value === undefined ? {} : { [key]: value };
 }
 
 /**
@@ -350,12 +369,16 @@ class SynchraActivityProvider implements ActivityProvider {
 export function describeActivity(activity: SynchraActivity): ActivityEntry {
 	return {
 		id: activity.id,
-		provider: activity.provider,
+		platform: activity.provider,
+		source: null,
+		at: requiredAtom(activity.created_at),
 		type: activity.type,
 		type_label: activity.type_display_name,
 		group: activity.activity_group,
-		viewer: activity.viewer_display_name,
-		avatar: activity.viewer_profile_picture_url ?? null,
+		actor: {
+			name: activity.viewer_display_name,
+			...optional('avatarUrl', activity.viewer_profile_picture_url)
+		},
 		// Money arrives as an integer plus a decimal place: 500 with two places is 5.00.
 		amount:
 			activity.count_decimal_place > 0
@@ -368,8 +391,7 @@ export function describeActivity(activity: SynchraActivity): ActivityEntry {
 		message: MessageContent.plainText(activity.message_parts),
 		message_parts: MessageContent.segments(activity.message_parts),
 		system_message: activity.system_message,
-		colour: activity.color,
-		created_at: requiredAtom(activity.created_at)
+		colour: activity.color
 	};
 }
 

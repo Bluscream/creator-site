@@ -1,5 +1,9 @@
 <!--
-	A viewer's picture, or a lettered disc standing in for one.
+	An actor's picture, or a lettered disc standing in for one.
+
+	Takes a canonical `Actor`, so the same component draws a chat message's speaker, a post's author
+	and a supporter on a toast. It was `ViewerAvatar` and took three loose fields, which is why there
+	was nearly a second one for posts.
 
 	Not every message comes with a picture, and a blank makes the log look broken and knocks the
 	rows out of alignment. So the initial is drawn instead, tinted with the viewer's own chat colour
@@ -13,19 +17,28 @@
 	and half of one renders as a replacement glyph. A viewer called 🖤Pauli is a real case.
 -->
 <script lang="ts">
+	import type { Actor } from '#lib/canonical.js';
+
 	interface Props {
-		name: string;
-		src: string | null;
-		/** The viewer's chat colour, used to tint the stand-in. */
-		colour: string | null;
+		actor: Actor;
+		/**
+		 * The colour to tint the stand-in with, overriding the actor's own.
+		 *
+		 * A caller that has already checked the actor's colour — the chat row drops anything that is
+		 * not a plain hex, because it ends up in a style attribute — passes the checked value rather
+		 * than making this component check it a second time and disagree.
+		 */
+		colour?: string | null;
 		size?: number;
 	}
 
-	let { name, src, colour, size = 24 }: Props = $props();
+	let { actor, colour = null, size = 24 }: Props = $props();
 
 	let failed = $state(false);
 
-	const initial = $derived((Array.from(name)[0] ?? '?').toUpperCase());
+	const src = $derived(actor.avatarUrl ?? null);
+	const tint = $derived(colour ?? actor.colour ?? null);
+	const initial = $derived((Array.from(actor.name)[0] ?? '?').toUpperCase());
 	const showImage = $derived(src !== null && src !== '' && !failed);
 </script>
 
@@ -48,7 +61,7 @@
 		aria-hidden="true"
 		style:width={`${String(size)}px`}
 		style:height={`${String(size)}px`}
-		style:color={colour ?? null}
+		style:color={tint}
 	>
 		{initial}
 	</span>

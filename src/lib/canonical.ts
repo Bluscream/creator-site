@@ -265,20 +265,37 @@ export interface Utterance extends Entity {
 }
 
 /** What a {@link Segment} is. */
-export const SEGMENT_KINDS = ['text', 'emote', 'link', 'mention'] as const;
+export const SEGMENT_KINDS = ['text', 'emote', 'gift', 'mention', 'link'] as const;
 
 /** One of {@link SEGMENT_KINDS}. */
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
 
-/** One drawable piece of an {@link Utterance}. */
+/**
+ * One drawable piece of an {@link Utterance}.
+ *
+ * A plain `imageUrl` rather than a {@link Media}, which is the one place this module does not reuse
+ * its own richer type, and deliberately. An emote url is a cdn path with no expiry, no dimensions
+ * and no alt text other than the emote's name, so a `Media` here would be four absent fields — and
+ * this shape is **structurally identical to what a provider library already resolves**. `synchra-ts`
+ * parses a platform's emote ranges into exactly `{ kind, text, imageUrl?, animated?, href? }`, so
+ * its result is assignable with no mapper. Reimplementing that resolution to get a prettier field
+ * name would be the wheel-reinvention this project avoids; {@link Badge} is the same bargain.
+ *
+ * A renderer walks the list once and switches on `kind`: draw `text`, or draw `imageUrl` with `text`
+ * as its alt, or draw a link to `href`. `text` is always set, which is what makes a plain-text
+ * fallback, a title attribute and a screen reader work without a second code path.
+ */
 export interface Segment {
 	readonly kind: SegmentKind;
 
 	/** The text, or the emote's name, or the link's label. Never empty. */
 	readonly text: string;
 
-	/** For an emote: the image to draw instead of the text. */
-	readonly media?: Media | undefined;
+	/** For an emote or a gift: the image to draw instead of the text. */
+	readonly imageUrl?: string | undefined;
+
+	/** Whether that image animates, so a client can respect `prefers-reduced-motion`. */
+	readonly animated?: boolean | undefined;
 
 	/** For a link: where it points. For a mention: the mentioned actor's profile. */
 	readonly href?: string | undefined;
