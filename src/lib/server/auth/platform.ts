@@ -1,0 +1,139 @@
+/**
+ * What a platform offers an account that links to it.
+ *
+ * The seam before this one was `./sign-in-provider.ts`, and it answered one question: *how do I sign
+ * somebody in with this?* That was the right seam while signing in was the only thing a platform was
+ * for. It is the wrong one now, because the direction recorded in `.references/LINKED_ACCOUNTS.md`
+ * is that **one link serves everything** — signing in, the credentials the post/chat/live readers
+ * need, and the "socials" the public page shows. A platform that can do three of those and not the
+ * fourth has to be able to say so, and a page offering a link has to be able to ask.
+ *
+ * So a platform is described here, once, and the sign-in provider becomes one *part* of that
+ * description rather than the whole of it.
+ *
+ * ### Two lists, not one
+ *
+ * {@link AccountPlatform.capabilities} is what a link *is good for*; {@link AccountPlatform.methods}
+ * is *how to get one*. They are independent, and the account page needs both: it offers Kick with an
+ * "OAuth" button only, because Kick has no personal access tokens, while it offers X with both and
+ * still has to say that the post feed is behind a paid tier. Collapsing them into one list would
+ * make "linkable" and "useful" the same claim, which for several of these platforms it is not.
+ *
+ * ### Why the id is the registry key
+ *
+ * {@link AccountPlatform.id} is simultaneously `connections.platform`, `identities.provider`, the
+ * `/auth/<id>/login` URL segment and a key of the registry in `src/lib/platforms.ts` — which is
+ * where the icon, the display name and the brand colour already live. One id, so a linked account
+ * renders with the same mark as a configured post source, and so nothing has a second table mapping
+ * one spelling to another. `platform-registry.test.ts` holds that to it.
+ */
+
+import type { LinkMethod } from '#lib/server/db/schema.js';
+import type { ProviderIdentity } from '../accounts.js';
+import type { SignInProvider } from './sign-in-provider.js';
+
+/**
+ * What a linked account can be used for.
+ *
+ * Deliberately the *capability*, never the vendor: `posts` is "this link can read the creator's own
+ * content", whether that content is VODs, uploads or threads. A page switches on these, so adding a
+ * platform never adds a branch anywhere.
+ */
+export const CAPABILITIES = ['sign-in', 'posts', 'chat', 'live', 'activity', 'social'] as const;
+
+/** One of {@link CAPABILITIES}. */
+export type Capability = (typeof CAPABILITIES)[number];
+
+/**
+ * A personal access token somebody pasted, checked against the platform.
+ *
+ * Checked at the point it is pasted rather than on first use, because the failure modes of a wrong
+ * token are a feed that silently stays empty and a live badge that never lights — neither of which
+ * points at the form that caused it. A platform that offers `token` linking must therefore be able
+ * to answer "whose account is this, and does this token work", which is the same question OAuth's
+ * `identify` answers and is why the return type is the same.
+ */
+export interface TokenLink {
+	/**
+	 * What to tell somebody to paste, and where to get it.
+	 *
+	 * Shown beside the field. Platform-specific by necessity — "a Twitch OAuth token from the CLI"
+	 * and "a Google API key" are not the same instruction — and kept with the platform so the form
+	 * stays generic.
+	 */
+	readonly hint: string;
+
+	/**
+	 * Whose account the token belongs to.
+	 *
+	 * Throws {@link import('./sign-in-provider.js').SignInFailure} when the platform rejects it, with
+	 * a message for the person who pasted it and never the platform's own response body: a rejected
+	 * credential request can echo the credential.
+	 */
+	verify(token: string): Promise<ProviderIdentity>;
+}
+
+/** One platform an account can be linked to. */
+export interface AccountPlatform {
+	/** The registry key. See the note at the top — this is written into rows and URLs. */
+	readonly id: string;
+
+	/** What to call it in a button or a heading. */
+	readonly label: string;
+
+	/** What a link to it can serve. Never empty: a platform good for nothing is not one. */
+	readonly capabilities: readonly Capability[];
+
+	/**
+	 * A limitation worth telling the creator about, or null.
+	 *
+	 * For the honest cases the research turned up — X can be linked and its identity read, but the
+	 * free tier cannot read the creator's own timeline. Surfacing that in the admin is the difference
+	 * between a documented limitation and a feed that looks broken.
+	 */
+	readonly caveat: string | null;
+
+	/**
+	 * How it can be linked, in the order the account page should offer them.
+	 *
+	 * OAuth first wherever it exists, because the secret never passes through a form. `login` last
+	 * and only where a platform offers nothing else.
+	 */
+	readonly methods: readonly LinkMethod[];
+
+	/** The OAuth half, when {@link methods} includes `oauth`. */
+	readonly oauth: SignInProvider | null;
+
+	/** The paste-a-token half, when {@link methods} includes `token`. */
+	readonly token: TokenLink | null;
+
+	/**
+	 * Whether this installation can actually link by a given method.
+	 *
+	 * Per method, because they are configured separately: a build with no Discord application cannot
+	 * offer OAuth but could still accept a token. A method that is offered and then fails on the
+	 * platform's own error page is worse than one that is not offered, because the person cannot tell
+	 * which end is broken.
+	 */
+	usable(method: LinkMethod): boolean;
+}
+
+/** Whether a platform claims a capability. */
+export function supports(platform: AccountPlatform, capability: Capability): boolean {
+	return platform.capabilities.includes(capability);
+}
+
+/**
+ * The methods this installation can actually offer for a platform.
+ *
+ * Both halves of the question at once — declared *and* configured — because every caller wants that
+ * and asking it in two steps is how a button for an unconfigured method gets rendered.
+ */
+export function offeredMethods(platform: AccountPlatform): readonly LinkMethod[] {
+	return platform.methods.filter((method) => platform.usable(method));
+}
+
+/** Whether a platform can be linked at all on this installation. */
+export function linkable(platform: AccountPlatform): boolean {
+	return offeredMethods(platform).length > 0;
+}

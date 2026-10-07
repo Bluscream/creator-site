@@ -1,23 +1,18 @@
 /**
  * Which ways of signing in this installation has.
  *
- * The same shape as `providers/posts-registry.ts` and for the same reason: one array, and adding a
- * provider is adding an entry to it. Nothing else in the application enumerates providers, so
- * nothing else has to be found and edited when a second one arrives.
- */
-
-import { discordSignIn } from './discord-sign-in.js';
-import type { SignInProvider } from './sign-in-provider.js';
-
-/**
- * Every provider this build knows how to sign in with.
+ * **Derived, not declared.** This used to hold its own array of providers, which meant a platform
+ * could appear in the platform registry and not here, or be linkable and not sign-in-able, with
+ * nothing to notice. The one list is `./platform-registry.ts`; signing in is the platforms that
+ * declare the `sign-in` capability and have an OAuth half this installation can use.
  *
- * Built once. A provider's constructor assigns strings and reads nothing, and `usable()` is what
- * reports whether it is configured — so this list is the same on a bare install as on a configured
- * one, and the difference shows up as a button that is not offered rather than as a provider that
- * is not there.
+ * The functions stay because the sign-in routes are about *signing in*, and asking them "which
+ * provider is `discord`" reads better at the callsite than asking the platform registry for a
+ * platform and then reaching into its `oauth` field.
  */
-const PROVIDERS: readonly SignInProvider[] = [discordSignIn()];
+
+import { platformsFor } from './platform-registry.js';
+import type { SignInProvider } from './sign-in-provider.js';
 
 /**
  * Providers a visitor can actually use, in the order they should be offered.
@@ -26,7 +21,9 @@ const PROVIDERS: readonly SignInProvider[] = [discordSignIn()];
  * rather than rendering a page with no buttons on it.
  */
 export function signInProviders(): readonly SignInProvider[] {
-	return PROVIDERS.filter((provider) => provider.usable());
+	return platformsFor('sign-in')
+		.map((entry) => entry.oauth)
+		.filter((provider): provider is SignInProvider => provider?.usable() === true);
 }
 
 /**
