@@ -42,7 +42,7 @@ describe('Cache.remember', () => {
 		const refresh = () => ++calls;
 
 		await cache.remember('k', 3600, refresh);
-		const forced = await cache.remember('k', 3600, refresh, true);
+		const forced = await cache.remember('k', 3600, refresh, { force: true });
 
 		expect(forced.data).toBe(2);
 		expect(forced.stale).toBe(false);
@@ -58,7 +58,7 @@ describe('Cache.remember', () => {
 			() => {
 				throw new Error('upstream said no');
 			},
-			true
+			{ force: true }
 		);
 
 		// The whole point: real data *and* an error, so a page can draw the figures and say why
@@ -102,10 +102,63 @@ describe('Cache.remember', () => {
 	});
 });
 
+describe('Cache validation', () => {
+	it('treats an entry that no longer fits its shape as a miss', async () => {
+		const parse = (value: unknown): { n: number } => {
+			if (
+				typeof value !== 'object' ||
+				value === null ||
+				typeof (value as { n: unknown }).n !== 'number'
+			) {
+				throw new TypeError('not the current shape');
+			}
+
+			return value as { n: number };
+		};
+
+		// Written by an older build, with a shape this one no longer accepts.
+		await cache.put('k', { legacy: true });
+
+		let refreshed = false;
+		const result = await cache.remember(
+			'k',
+			3600,
+			() => {
+				refreshed = true;
+
+				return { n: 1 };
+			},
+			{ parse }
+		);
+
+		// The whole point: a stale *shape* refetches rather than being handed over as the new type,
+		// and rather than failing the request.
+		expect(refreshed).toBe(true);
+		expect(result.data).toEqual({ n: 1 });
+		expect(result.error).toBeNull();
+	});
+
+	it('returns a validated value from get, and null when it does not fit', async () => {
+		const parse = (value: unknown): string => {
+			if (typeof value !== 'string') throw new TypeError('not a string');
+
+			return value;
+		};
+
+		await cache.put('text', 'hello');
+		await cache.put('number', 42);
+
+		expect((await cache.get('text', parse))?.data).toBe('hello');
+		expect(await cache.get('number', parse)).toBeNull();
+	});
+});
+
 describe('Cache.get / put / forget', () => {
 	it('round-trips a value and reports its age', async () => {
 		await cache.put('k', { hello: 'world' });
-		const got = await cache.get<{ hello: string }>('k');
+		// No validator, so the value comes back as `unknown` — claiming a type here would be a cast
+		// wearing a generic's clothes, which is exactly what this API refuses to offer.
+		const got = await cache.get('k');
 
 		expect(got?.data).toEqual({ hello: 'world' });
 		expect(got?.age).toBeGreaterThanOrEqual(0);

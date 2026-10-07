@@ -2,7 +2,28 @@
 	"extends": "$app/tsconfig",
 	"compilerOptions": {
 		"strict": true,
+
+		// `strict` is the starting point, not the target. Each of these turns a class of runtime
+		// bug into a compile error, and none should be removed without a reason written beside it.
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"exactOptionalPropertyTypes": true,
+		"isolatedModules": true,
+		"noImplicitReturns": true,
+		"forceConsistentCasingInFileNames": true,
+		"verbatimModuleSyntax": true,
+
 		"types": ["$app/types", "node"]
 	},
-	"include": ["src", "vite.config.ts", "playwright.config.ts", "drizzle.config.ts"]
+	"include": [
+		"src",
+		"vite.config.ts",
+		"playwright.config.ts",
+		"drizzle.config.ts",
+		"eslint.config.js",
+		"prettier.config.js"
+	]
 }

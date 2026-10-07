@@ -32,7 +32,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"lint": "prettier --check . && eslint .",
+		"lint": "npm run format:check && npm run lint:code",
 		"format": "prettier --write .",
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
@@ -40,7 +40,10 @@
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
-		"db:studio": "drizzle-kit studio"
+		"db:studio": "drizzle-kit studio",
+		"gate": "npm run format:check && npm run lint:code && npm run build && npm run check && npm run test:unit -- --run",
+		"format:check": "prettier --check .",
+		"lint:code": "eslint ."
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",

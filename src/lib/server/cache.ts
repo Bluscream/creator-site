@@ -44,6 +44,35 @@ interface StoredEntry {
 	data: unknown;
 }
 
+/**
+ * Turns whatever was on disk into the value the caller expects, or throws.
+ *
+ * A plain function rather than a schema type, so this module depends on no validation library and
+ * stays liftable into a package of its own. `zodSchema.parse` satisfies it as-is.
+ */
+export type Parse<T> = (value: unknown) => T;
+
+export interface RememberOptions<T> {
+	/**
+	 * Refresh even when the entry is still fresh — the Reload button.
+	 *
+	 * It deliberately does not skip the lock: a forced refresh arriving while another caller is
+	 * already fetching serves the stale copy rather than making a second call upstream, which is
+	 * what stops a held-down Reload becoming a burst of requests.
+	 */
+	force?: boolean;
+
+	/**
+	 * Validates a value read back from disk.
+	 *
+	 * Without it, a hit is an unchecked assertion: the entry was written by *some* build of this
+	 * application, not necessarily this one, and a shape that changed between deploys would be
+	 * handed to the caller as the new type. With it, a value that no longer fits is treated as a
+	 * miss and refetched, which is the behaviour anybody would have wanted anyway.
+	 */
+	parse?: Parse<T>;
+}
+
 export class Cache {
 	readonly #directory: string;
 
@@ -72,15 +101,16 @@ export class Cache {
 		key: string,
 		ttl: number,
 		refresh: () => Promise<T> | T,
-		force = false
+		options: RememberOptions<T> = {}
 	): Promise<CacheEntry<T>> {
+		const { force = false, parse } = options;
 		const path = this.#path(key);
-		const cached = await this.#read(path);
+		const cached = await this.#reviveEntry(path, parse);
 		const age =
 			cached === null ? Number.MAX_SAFE_INTEGER : Math.floor(Date.now() / 1000) - cached.at;
 
 		if (!force && cached !== null && age < ttl) {
-			return { data: cached.data as T, age, stale: false, error: null };
+			return { data: cached.data, age, stale: false, error: null };
 		}
 
 		const release = await this.#acquire(path);
@@ -88,7 +118,7 @@ export class Cache {
 		if (release === null) {
 			// Someone else is refreshing. Hand back what we have, however old.
 			return {
-				data: (cached?.data ?? null) as T | null,
+				data: cached?.data ?? null,
 				age: cached === null ? 0 : age,
 				stale: true,
 				error: null
@@ -102,7 +132,7 @@ export class Cache {
 			return { data: fresh, age: 0, stale: false, error: null };
 		} catch (cause) {
 			return {
-				data: (cached?.data ?? null) as T | null,
+				data: cached?.data ?? null,
 				age: cached === null ? 0 : age,
 				stale: true,
 				error: cause instanceof Error ? cause.message : String(cause)
@@ -118,15 +148,22 @@ export class Cache {
 	 * {@link remember} covers the usual case. This is for the caller that has to decide for itself
 	 * whether to refresh — where how long an entry stays good depends on what is in it, or where a
 	 * refresh has a per-request budget — so it reports the age and leaves the decision alone.
+	 *
+	 * The value comes back as `unknown` on purpose. It was read off a disk that an older build of
+	 * this application wrote, so the caller either validates it or does not get to claim a type:
+	 * `get<T>` would have been a cast wearing a generic's clothes. Pass `parse` to get a typed
+	 * value, or validate the result yourself.
 	 */
-	async get<T>(key: string): Promise<{ data: T; age: number } | null> {
-		const cached = await this.#read(this.#path(key));
+	async get(key: string): Promise<{ data: unknown; age: number } | null>;
+	async get<T>(key: string, parse: Parse<T>): Promise<{ data: T; age: number } | null>;
+	async get<T>(key: string, parse?: Parse<T>): Promise<{ data: unknown; age: number } | null> {
+		const cached = await this.#reviveEntry(this.#path(key), parse);
 
 		if (cached === null) {
 			return null;
 		}
 
-		return { data: cached.data as T, age: Math.floor(Date.now() / 1000) - cached.at };
+		return { data: cached.data, age: Math.floor(Date.now() / 1000) - cached.at };
 	}
 
 	/** Stores a value for `key`, to be read back with {@link get}. */
@@ -137,6 +174,35 @@ export class Cache {
 	/** Drops one entry, if it exists. Missing is not an error. */
 	async forget(key: string): Promise<void> {
 		await rm(this.#path(key), { force: true });
+	}
+
+	/**
+	 * One stored entry, validated if the caller supplied a validator.
+	 *
+	 * A value that fails validation is reported as a miss rather than as an error: the common cause
+	 * is an entry written before a shape changed, and the correct response to that is to refetch,
+	 * not to fail the request.
+	 */
+	async #reviveEntry<T>(
+		path: string,
+		parse: Parse<T> | undefined
+	): Promise<{ at: number; data: T } | null> {
+		const stored = await this.#read(path);
+
+		if (stored === null) {
+			return null;
+		}
+
+		if (parse === undefined) {
+			// No validator: the caller has accepted `unknown`, and T is `unknown` with it.
+			return { at: stored.at, data: stored.data as T };
+		}
+
+		try {
+			return { at: stored.at, data: parse(stored.data) };
+		} catch {
+			return null;
+		}
 	}
 
 	async #read(path: string): Promise<StoredEntry | null> {
@@ -181,7 +247,7 @@ export class Cache {
 			return;
 		}
 
-		const temporary = `${path}.${process.pid}.tmp`;
+		const temporary = `${path}.${String(process.pid)}.tmp`;
 
 		try {
 			await writeFile(temporary, encoded, 'utf8');

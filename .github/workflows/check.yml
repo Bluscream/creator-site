@@ -35,15 +35,11 @@ jobs:
 
       - run: npm ci
 
-      # Before the type check: Paraglide's generated messages and SvelteKit's generated types do
-      # not exist in a fresh checkout, and svelte-check reports every import of them as an error.
-      - run: npm run build
-
-      - run: npm run check
-
-      - run: npm run lint
-
-      - run: npm run test:unit -- --run
+      # One step, not six. `gate` is the same command run locally before anything is claimed to
+      # work, so CI cannot drift from it: format check, strict lint, build, type check, tests.
+      # (The build comes before the type check because Paraglide's messages and SvelteKit's types
+      # do not exist in a fresh checkout, and svelte-check flags every import of them.)
+      - run: npm run gate
 
       - if: ${{ inputs.e2e }}
         run: npm run test:e2e

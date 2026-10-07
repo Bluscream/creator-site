@@ -22,20 +22,51 @@ npm install
 npm run dev
 ```
 
-|                     |                                             |
-| ------------------- | ------------------------------------------- |
-| `npm run dev`       | development server with HMR                 |
-| `npm run build`     | production build (`@sveltejs/adapter-node`) |
-| `npm run preview`   | serve the production build locally          |
-| `npm run check`     | `svelte-check` over the whole project       |
-| `npm run lint`      | Prettier check and ESLint                   |
-| `npm run format`    | rewrite with Prettier                       |
-| `npm run test:unit` | Vitest                                      |
-| `npm run test:e2e`  | Playwright                                  |
-| `npm run db:push`   | apply the Drizzle schema to the database    |
-| `npm run db:studio` | browse the database                         |
+|                     |                                                              |
+| ------------------- | ------------------------------------------------------------ |
+| **`npm run gate`**  | **the whole gate — run this before claiming anything works** |
+| `npm run dev`       | development server with HMR                                  |
+| `npm run build`     | production build (`@sveltejs/adapter-node`)                  |
+| `npm run preview`   | serve the production build locally                           |
+| `npm run check`     | `svelte-check` over the whole project                        |
+| `npm run lint`      | Prettier check and ESLint                                    |
+| `npm run format`    | rewrite with Prettier                                        |
+| `npm run test:unit` | Vitest                                                       |
+| `npm run test:e2e`  | Playwright                                                   |
+| `npm run db:push`   | apply the Drizzle schema to the database                     |
+| `npm run db:studio` | browse the database                                          |
 
 Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same major).
+
+## The gate
+
+`npm run gate` is format check → strict lint → build → type check → tests, in that order, and it is
+what CI runs. One command rather than six, so CI cannot drift from what runs locally. The build
+comes before the type check because Paraglide's messages and SvelteKit's types do not exist in a
+fresh checkout and `svelte-check` flags every import of them.
+
+**Strictness is the starting point, not something to migrate toward.**
+
+- `tsconfig.json` runs `strict` plus `noUncheckedIndexedAccess`, `noImplicitOverride`,
+  `noFallthroughCasesInSwitch`, `noUnusedLocals`, `noUnusedParameters`, `exactOptionalPropertyTypes`,
+  `isolatedModules`, `noImplicitReturns` and `verbatimModuleSyntax`. The type check passes with
+  **zero errors and zero warnings** or the gate fails.
+- ESLint runs `strictTypeChecked` and `stylisticTypeChecked` — the type-aware tiers, not
+  `recommended` — over every file, plus `no-floating-promises`, `no-misused-promises`, `no-console`
+  (bar `console.error`), `ban-ts-comment`, and a ban on `enum` and `namespace`.
+- **Size limits are enforced mechanically**, not by eye: `max-lines` 1000, `max-lines-per-function`
+  100, `max-params` 5, `max-depth` 3. Tests are exempt from the line counts, because a `describe`
+  block is one unit of meaning and splitting it to satisfy a counter makes a suite harder to read.
+- Config files are type-checked too — `eslint.config.js` and `prettier.config.js` are in
+  `tsconfig.json`'s `include`, because a lint config that silently fails to apply a rule is worse
+  than not having one.
+
+### Suppressions
+
+There is exactly **one** in the project, and it should stay that way. `src/app.d.ts` disables
+`no-restricted-syntax` for a single line, because SvelteKit's ambient types are keyed on a global
+`App` **namespace** and there is no module form of that declaration. It names the rule, covers one
+line, and carries its reason above it. Any other suppression should be argued for in review.
 
 ## Toolchain notes
 
