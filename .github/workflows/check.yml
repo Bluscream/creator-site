@@ -1,0 +1,49 @@
+name: check
+
+# Disabled: workflows do not run under the account this repository lives on, so an automatic
+# trigger queues forever and silently blocks anything waiting on it. Uncomment the block below if
+# you fork this repository to an account with Actions enabled.
+#
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+
+on:
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: Also run the Playwright suite
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # Before the type check: Paraglide's generated messages and SvelteKit's generated types do
+      # not exist in a fresh checkout, and svelte-check reports every import of them as an error.
+      - run: npm run build
+
+      - run: npm run check
+
+      - run: npm run lint
+
+      - run: npm run test:unit -- --run
+
+      - if: ${{ inputs.e2e }}
+        run: npm run test:e2e
