@@ -15,10 +15,10 @@ configured.
 > **Status: early.** In: the API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`,
 > `/api/posts`), the chat page, the configuration document layer, and the container.
 >
-> Not in: the admin, the links page, the calendar, and any post source other than a plain feed —
-> `youtube`, `twitch`, `bluesky` and `tiktok` are configurable but report that they have no reader
-> yet. There is no schema in the database and nothing writes to it. Nothing here is deployable as a
-> finished site.
+> Not in: the admin, the links page, the calendar, and three of the five post source kinds —
+> `twitch`, `bluesky` and `tiktok` are configurable but report that they have no reader yet. There
+> is no schema in the database and nothing writes to it. Nothing here is deployable as a finished
+> site.
 
 ## Running it
 
@@ -151,7 +151,7 @@ registry maps a kind to the reader for it rather than choosing one
 | kind      | how it is read                                         | needs           | state     |
 | --------- | ------------------------------------------------------ | --------------- | --------- |
 | `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built** |
-| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | planned   |
+| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built** |
 | `twitch`  | the official Helix API — videos and clips              | two credentials | planned   |
 | `bluesky` | the public AppView, unauthenticated                    | nothing         | planned   |
 | `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | planned   |
