@@ -13,7 +13,7 @@
  * registry, so the cache's own read/write path is exercised rather than mocked.
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,6 +26,9 @@ let cache: Cache;
 /** What each kind's provider will do on its next read, by kind. */
 const behaviour = new Map<string, () => Promise<readonly Post[]>>();
 
+/** How long a kind's provider says its image urls last, by kind. Absent means indefinitely. */
+const imageTtls = new Map<string, number>();
+
 vi.mock('./providers/posts-registry.js', () => ({
 	postsSourceProvider: (kind: string) => ({
 		unusable: () => (behaviour.has(kind) ? null : `No reader for ${kind}.`),
@@ -35,7 +38,8 @@ vi.mock('./providers/posts-registry.js', () => ({
 			if (act === undefined) throw new Error('read without a behaviour');
 
 			return act();
-		}
+		},
+		imageTtl: imageTtls.get(kind)
 	}),
 	implementedKinds: () => [],
 	plannedKinds: () => []
@@ -52,6 +56,33 @@ function configure(
 		JSON.stringify({ sources, ...extra }),
 		'utf8'
 	);
+}
+
+/**
+ * Makes every cache entry look `seconds` old.
+ *
+ * The cache stores its own `at` in each file rather than relying on mtime, so this rewrites that
+ * rather than touching timestamps. Every file in the directory rather than one by name, because the
+ * key is hashed and a test that reconstructed the hash would be testing the cache's private
+ * business.
+ */
+function backdate(seconds: number) {
+	const base = join(directory, 'cache');
+
+	for (const entry of readdirSync(base, { recursive: true, withFileTypes: true })) {
+		if (!entry.isFile()) continue;
+
+		const path = join(entry.parentPath, entry.name);
+		const stored: unknown = JSON.parse(readFileSync(path, 'utf8'));
+
+		if (typeof stored !== 'object' || stored === null || !('at' in stored)) continue;
+
+		writeFileSync(
+			path,
+			JSON.stringify({ ...stored, at: Math.floor(Date.now() / 1000) - seconds }),
+			'utf8'
+		);
+	}
 }
 
 /** A post from a source, at a given time. */
@@ -80,6 +111,7 @@ beforeEach(() => {
 	directory = mkdtempSync(join(tmpdir(), 'creator-site-posts-'));
 	cache = new Cache(join(directory, 'cache'));
 	behaviour.clear();
+	imageTtls.clear();
 	vi.stubEnv('DATA_DIR', directory);
 });
 
@@ -357,5 +389,115 @@ describe('the cap', () => {
 		const { posts } = await freshPosts();
 
 		expect((await posts({ cache, limit: 1 })).posts).toHaveLength(1);
+	});
+});
+
+/**
+ * A stale post whose picture has expired.
+ *
+ * TikTok signs every cover url with an expiry about two days out, and a failed refresh keeps
+ * serving the last good posts for as long as the failure lasts — deliberately and without bound,
+ * because a title, a link and a date do not go stale. The picture does. Past its signature it is a
+ * 404, and a row of broken images looks worse than the same rows with no images.
+ */
+describe('a source that has been failing for days', () => {
+	/** A post with a picture, as a provider that signs its thumbnails would return. */
+	function pictured(id: string, at: string): Post {
+		return {
+			...post('a', id, at),
+			image: `https://cdn.test/${id}.jpg?x-expires=1`
+		};
+	}
+
+	beforeEach(() => {
+		configure([{ id: 'a', kind: 'feed', url: 'https://a.test/f' }]);
+	});
+
+	it('keeps serving the posts, which is the point of the per-source cache', async () => {
+		imageTtls.set('feed', 36 * 60 * 60);
+		behaviour.set('feed', () => Promise.resolve([pictured('1', '2026-10-01T00:00:00.000Z')]));
+
+		const first = await freshPosts();
+
+		await first.posts({ cache });
+		backdate(40 * 60 * 60);
+
+		behaviour.set('feed', () => Promise.reject(new Error('still down')));
+
+		const second = await freshPosts();
+		const result = await second.posts({ cache, ttl: 0 });
+
+		expect(result.posts.map((entry) => entry.id)).toStrictEqual(['a:1']);
+		expect(result.sources[0]?.ok).toBe(false);
+	});
+
+	it('drops a picture that has outlived its signature', async () => {
+		imageTtls.set('feed', 36 * 60 * 60);
+		behaviour.set('feed', () => Promise.resolve([pictured('1', '2026-10-01T00:00:00.000Z')]));
+
+		const first = await freshPosts();
+
+		await first.posts({ cache });
+		backdate(40 * 60 * 60);
+
+		behaviour.set('feed', () => Promise.reject(new Error('still down')));
+
+		const second = await freshPosts();
+
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).toBeNull();
+	});
+
+	it('keeps the picture while the signature is still good', async () => {
+		imageTtls.set('feed', 36 * 60 * 60);
+		behaviour.set('feed', () => Promise.resolve([pictured('1', '2026-10-01T00:00:00.000Z')]));
+
+		const first = await freshPosts();
+
+		await first.posts({ cache });
+		backdate(10 * 60 * 60);
+
+		behaviour.set('feed', () => Promise.reject(new Error('briefly down')));
+
+		const second = await freshPosts();
+
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).not.toBeNull();
+	});
+
+	it('keeps the picture forever for a provider that does not sign them', async () => {
+		// No `imageTtl`: most platforms serve a plain cdn url that does not expire, and dropping
+		// those would make a briefly-broken feed worse than it needs to be.
+		behaviour.set('feed', () => Promise.resolve([pictured('1', '2026-10-01T00:00:00.000Z')]));
+
+		const first = await freshPosts();
+
+		await first.posts({ cache });
+		backdate(400 * 24 * 60 * 60);
+
+		behaviour.set('feed', () => Promise.reject(new Error('long gone')));
+
+		const second = await freshPosts();
+
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).not.toBeNull();
+	});
+
+	it('drops the picture on a source that has become unreadable, not only a failing one', async () => {
+		// The `unusable` path returns cached posts too — credentials removed, a target that stopped
+		// being a url — and it reaches them the same way.
+		imageTtls.set('feed', 36 * 60 * 60);
+		behaviour.set('feed', () => Promise.resolve([pictured('1', '2026-10-01T00:00:00.000Z')]));
+
+		const first = await freshPosts();
+
+		await first.posts({ cache });
+		backdate(40 * 60 * 60);
+
+		// Removing the behaviour makes the stub provider report itself unusable.
+		behaviour.delete('feed');
+
+		const second = await freshPosts();
+		const result = await second.posts({ cache, ttl: 0 });
+
+		expect(result.posts[0]?.image).toBeNull();
+		expect(result.sources[0]?.reason).toMatch(/No reader/);
 	});
 });

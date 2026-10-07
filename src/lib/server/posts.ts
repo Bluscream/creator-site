@@ -167,21 +167,24 @@ function reasonFor(error: unknown, source: ResolvedSource): string {
 async function readSource(source: ResolvedSource, cache: Cache, ttl: number): Promise<Outcome> {
 	const key = sourceCacheKey(source);
 	const entry = await cache.get(key, cachedPosts);
-	const cached = entry?.data ?? [];
+	const provider = postsSourceProvider(source.kind);
+	const age = entry?.age ?? null;
+
+	// Whatever this source last returned, with any images that have outlived their signature
+	// dropped. See `stillShowable`.
+	const cached = stillShowable(entry?.data ?? [], age, provider.imageTtl);
 
 	// Fresh enough: no request at all for this one.
 	if (entry !== null && entry.age < ttl) {
 		return { posts: cached, reason: null, age: entry.age };
 	}
 
-	const provider = postsSourceProvider(source.kind);
-
 	// Asked before anything is sent, so a source that can never work says so immediately instead of
 	// failing once per refresh for the rest of time.
 	const unusable = provider.unusable(source);
 
 	if (unusable !== null) {
-		return { posts: cached, reason: unusable, age: entry?.age ?? null };
+		return { posts: cached, reason: unusable, age };
 	}
 
 	try {
@@ -193,8 +196,28 @@ async function readSource(source: ResolvedSource, cache: Cache, ttl: number): Pr
 	} catch (error) {
 		// The whole point of the per-source cache: a failed refresh falls back to whatever this
 		// source last returned rather than contributing nothing.
-		return { posts: cached, reason: reasonFor(error, source), age: entry?.age ?? null };
+		return { posts: cached, reason: reasonFor(error, source), age };
 	}
+}
+
+/**
+ * Cached posts with expired images dropped.
+ *
+ * A failed refresh keeps serving the last good posts for as long as the failure lasts, which is
+ * deliberate: a title, a link and a date do not go stale. A *signed* image url does — past its
+ * expiry it is a 404, and a row with a broken picture looks worse than the same row with none.
+ *
+ * Only the picture is dropped, never the post. The link still works, which is the part a reader
+ * actually wanted.
+ */
+function stillShowable(
+	posts: readonly Post[],
+	age: number | null,
+	imageTtl: number | undefined
+): readonly Post[] {
+	if (imageTtl === undefined || age === null || age < imageTtl) return posts;
+
+	return posts.map((post) => (post.image === null ? post : { ...post, image: null }));
 }
 
 /**

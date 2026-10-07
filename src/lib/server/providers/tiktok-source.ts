@@ -186,6 +186,11 @@ export function stateIn(html: string): unknown {
 }
 
 export const tiktokSourceProvider: PostsSourceProvider = {
+	// Measured: a cover url's `x-expires` was about 44 hours out. 36 is that with room for a
+	// shorter one, which costs only the pictures on a feed that has been failing for a day and a
+	// half — by which point they are about to 404 anyway.
+	imageTtl: 36 * 60 * 60,
+
 	unusable(source: ResolvedSource): string | null {
 		return handleOf(source.target) === null ? ADVICE : null;
 	},

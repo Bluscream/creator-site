@@ -207,6 +207,13 @@ mid-throttle replace fifteen good videos with nothing and serve that for the res
 Per-source entries mean a briefly-broken platform keeps showing its last good posts — which is why a
 source can report `ok: false` with a non-zero `count`, and why `age` is the oldest source's.
 
+That fallback is deliberately unbounded, because a title, a link and a date do not go stale. A
+**signed** image url does: TikTok's cover urls carry an `x-expires` about two days out, so a source
+failing for longer than that would serve rows whose every picture is a 404. A provider declares how
+long its image urls last (`imageTtl`), and past it the orchestrator drops the picture from a stale
+post and keeps the rest — the link still works, which is the part a reader wanted. Most platforms
+serve plain cdn urls, declare nothing, and keep their pictures indefinitely.
+
 **One interface per capability, not one per provider.** Owncast can answer "am I live" and nothing
 else; Twitch can do live and chat but knows nothing about donations; Ko-fi knows only donations; a
 service may be able to push events without being able to answer for a backlog, or the reverse. A

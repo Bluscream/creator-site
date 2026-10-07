@@ -109,4 +109,19 @@ export interface PostsSourceProvider {
 
 	/** The source's posts, newest-first order not required — the orchestrator sorts. */
 	read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]>;
+
+	/**
+	 * How long this provider's image urls stay valid, in seconds. Absent means indefinitely.
+	 *
+	 * For a platform that signs its thumbnails with an expiry. A failed refresh falls back to the
+	 * last good posts for as long as the failure lasts, which is deliberate and unbounded — a title,
+	 * a link and a date do not go stale. A *signed* image url does: past its expiry it is a 404, and
+	 * a row with a broken picture looks worse than the same row with no picture at all.
+	 *
+	 * So the orchestrator drops the image from a stale post once the cached entry is older than
+	 * this, and keeps everything else. Declared by the provider because which urls expire is the
+	 * platform's business, not the orchestrator's — this is the one thing it could not work out for
+	 * itself, and the alternative was a list of hostnames somewhere central.
+	 */
+	readonly imageTtl?: number;
 }
