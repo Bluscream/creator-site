@@ -82,6 +82,49 @@ There is exactly **one** in the project, and it should stay that way. `src/app.d
 `App` **namespace** and there is no module form of that declaration. It names the rule, covers one
 line, and carries its reason above it. Any other suppression should be argued for in review.
 
+## Providers: nothing is bound to one vendor
+
+This is software other people install, and **most of them will not have an account with whichever
+service this developer uses.** So every capability that reaches a visitor is an interface, and the
+service behind it is a deployment's choice.
+
+| capability | implementations that exist or are planned                                |
+| ---------- | ------------------------------------------------------------------------ |
+| `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast    |
+| `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat             |
+| `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall |
+
+**One interface per capability, not one per provider.** Owncast can answer "am I live" and nothing
+else; Twitch can do live and chat but knows nothing about donations; Ko-fi knows only donations. A
+single `Provider` interface would force most of them to stub out most of it, and would make "does
+this deployment have chat?" unanswerable without trying it. A provider implements what it can and
+declares which in its descriptor.
+
+**A provider never touches HTTP or configuration.** It is handed a `Credential`, returns this
+project's own domain types, and throws `ServiceFailure` when it cannot. It does not read the
+environment, does not know what a `Response` is, and does not choose status codes — so a provider
+contributed later cannot get any of that subtly wrong. `ServiceFailure` lives in its own module
+(`src/lib/server/failure.ts`) rather than in `endpoint.ts` for exactly this reason.
+
+**Domain types belong to this project.** `LiveStatus` and `PlatformState` are declared in
+`src/lib/live.ts` and nothing is re-exported from a vendor SDK. No field exists because some API
+happened to return it.
+
+**One place for auth.** `src/lib/server/providers/credentials.ts` is the only module that resolves a
+credential. Today it reads environment variables; when the admin exists it will read encrypted rows
+from the database, and **only that file changes**.
+
+**How a provider is chosen** (`registry.ts`): the one configuration names, else the first registered
+factory whose credentials are present, else `not_configured`. A named provider that is missing or
+unconfigured is a _refusal_, not a fallback — silently using something else than the operator asked
+for is impossible to debug from the outside.
+
+There is deliberately **no dynamic loading, container or plugin discovery**. One implementation
+exists; machinery for a second one that does not is machinery nobody can check. What the registry
+guarantees is the seam: adding Restream means adding a factory to one array, and nothing outside
+`src/lib/server/providers/` changes. The selection rules are tested against stand-in providers, so
+"prefers the configured one over a merely usable one" is checked even though only Synchra is real.
+
 ## Libraries over reimplementation
 
 **If a maintained library does the whole job, it does the job.** Four modules ported from the PHP

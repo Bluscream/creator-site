@@ -1,0 +1,39 @@
+{
+	"age": 0,
+	"any_live": false,
+	"configured": true,
+	"error": null,
+	"generated_at": "2026-10-07T04:07:08+00:00",
+	"ok": true,
+	"platforms": {
+		"tiktok": {
+			"handle": "bleichiloveless",
+			"live": false,
+			"started_at": null,
+			"stream_id": null,
+			"title": null,
+			"url": "https://www.tiktok.com/@bleichiloveless/live",
+			"viewers": null
+		},
+		"twitch": {
+			"handle": "bleichi_loveless",
+			"live": false,
+			"started_at": null,
+			"stream_id": null,
+			"title": null,
+			"url": "https://www.twitch.tv/bleichi_loveless",
+			"viewers": null
+		},
+		"youtube": {
+			"handle": "bleichiloveless",
+			"live": false,
+			"started_at": null,
+			"stream_id": null,
+			"title": null,
+			"url": "https://www.youtube.com/@bleichiloveless/live",
+			"viewers": null
+		}
+	},
+	"stale": false,
+	"total_viewers": null
+}

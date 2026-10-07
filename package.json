@@ -69,6 +69,7 @@
 		"read-last-lines": "^1.10.0",
 		"rotating-file-stream": "^3.2.10",
 		"simple-icons": "^16.34.0",
+		"synchra-ts": "^0.1.0",
 		"zod": "^4.6.5"
 	},
 	"devDependencies": {

@@ -25,7 +25,15 @@ const FORBIDDEN = [
 	{ pattern: /(^|\/)id_(rsa|dsa|ecdsa|ed25519)$/, why: 'an SSH private key' },
 	{ pattern: /(^|\/)\.npmrc$/, why: 'may carry a registry auth token — keep it out of the tree' },
 	{ pattern: /\.(db|sqlite|sqlite3)$/i, why: "a database; this project's data is never committed" },
-	{ pattern: /(^|\/)\.DS_Store$/, why: 'macOS clutter' }
+	{ pattern: /(^|\/)\.DS_Store$/, why: 'macOS clutter' },
+	{
+		pattern: /\.log$/i,
+		why: 'a log file — runtime output, never source'
+	},
+	{
+		pattern: /^data\//,
+		why: 'the runtime data directory (DATA_DIR) — the database, logs and cache live here'
+	}
 ];
 
 /** A file this big is almost always a mistake, and it is in the clone forever. */

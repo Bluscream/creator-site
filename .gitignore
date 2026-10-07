@@ -29,5 +29,9 @@ project.inlang/cache/
 # SQLite
 *.db
 
+# Runtime data: the database, the log and the cache (DATA_DIR, default ./data)
+/data
+*.log
+
 # Working notes and design documents kept beside the code but not published
 .references/
