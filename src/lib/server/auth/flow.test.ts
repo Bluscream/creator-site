@@ -61,6 +61,7 @@ const {
 
 const { SignInFailure } = await import('./sign-in-provider.js');
 const { SESSION_COOKIE, resolve } = await import('../session.js');
+const { findByIdentity, identitiesOf, signIn } = await import('../accounts.js');
 
 let database: OpenMemoryDb;
 
@@ -521,5 +522,186 @@ describe('signOut', () => {
 		expect(() => {
 			signOut({ cookies });
 		}).not.toThrow();
+	});
+});
+
+/**
+ * Linking another way to sign in.
+ *
+ * A different thing from signing in, and the difference is where the takeover risk is: the identity
+ * that comes back is attached to an account that already exists. So every one of these is about a
+ * way that could go wrong — the wrong account, nobody's account, or somebody else's identity.
+ */
+describe('the link intent', () => {
+	/** Signs somebody in and hands back their principal and jar. */
+	async function existing() {
+		const { completed, cookies, values } = await roundTrip();
+
+		return { principal: completed.principal, cookies, values };
+	}
+
+	/** Runs a link flow for `signedIn`, with `provider` answering as whatever identity it answers. */
+	async function linkTrip(
+		provider: SignInProvider,
+		signedIn: Parameters<typeof completeSignIn>[2],
+		options: { readonly startedBy?: string } = {}
+	) {
+		const { cookies } = jar();
+		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+			intent: 'link',
+			...(options.startedBy === undefined ? {} : { userId: options.startedBy })
+		});
+		const state = url.searchParams.get('state') ?? '';
+
+		return completeSignIn(
+			provider,
+			requestFor(`/auth/stub/callback?code=abc&state=${state}`, cookies),
+			signedIn
+		);
+	}
+
+	/** A provider answering as a different person from the one `stubProvider` answers as. */
+	function otherIdentity(): SignInProvider {
+		return stubProvider({
+			kind: 'other',
+			identify: () =>
+				Promise.resolve<ProviderIdentity>({
+					provider: 'other',
+					providerUserId: '99',
+					name: 'Another'
+				})
+		});
+	}
+
+	it('attaches the new identity to the signed-in account', async () => {
+		const { principal } = await existing();
+
+		await linkTrip(otherIdentity(), principal, { startedBy: principal.userId });
+
+		expect(
+			identitiesOf(principal.userId)
+				.map((row) => row.provider)
+				.toSorted()
+		).toStrictEqual(['other', 'stub']);
+	});
+
+	it('reports that it was a link rather than a sign-in', async () => {
+		const { principal } = await existing();
+
+		const completed = await linkTrip(otherIdentity(), principal, { startedBy: principal.userId });
+
+		expect(completed.intent).toBe('link');
+	});
+
+	it('creates no second account', async () => {
+		const { principal } = await existing();
+
+		await linkTrip(otherIdentity(), principal, { startedBy: principal.userId });
+
+		expect(database.rows('SELECT id FROM users')).toHaveLength(1);
+	});
+
+	it('issues no second session, because they are already signed in', async () => {
+		const { principal } = await existing();
+
+		await linkTrip(otherIdentity(), principal, { startedBy: principal.userId });
+
+		expect(database.rows('SELECT id FROM sessions')).toHaveLength(1);
+	});
+
+	it('makes the new identity resolve to the same account', async () => {
+		const { principal } = await existing();
+
+		await linkTrip(otherIdentity(), principal, { startedBy: principal.userId });
+
+		expect(findByIdentity('other', '99')?.userId).toBe(principal.userId);
+	});
+
+	it('refuses a link with nobody signed in', async () => {
+		await existing();
+
+		await expect(linkTrip(otherIdentity(), null, { startedBy: 'somebody' })).rejects.toThrow(
+			/signed in/
+		);
+	});
+
+	it('refuses a flow started by a different account', async () => {
+		// A shared browser where somebody signed out and back in while the first tab was away at the
+		// provider. The alternative attaches one person's identity to whoever holds the session now.
+		const { principal } = await existing();
+
+		await expect(
+			linkTrip(otherIdentity(), principal, { startedBy: 'somebody-else' })
+		).rejects.toThrow(/different account/);
+	});
+
+	it('refuses a flow that named nobody', async () => {
+		const { principal } = await existing();
+
+		await expect(linkTrip(otherIdentity(), principal)).rejects.toThrow(/different account/);
+	});
+
+	it('attaches nothing when it refuses', async () => {
+		const { principal } = await existing();
+
+		await linkTrip(otherIdentity(), principal, { startedBy: 'somebody-else' }).catch(() => null);
+
+		expect(findByIdentity('other', '99')).toBeNull();
+	});
+
+	it('refuses an identity another account already holds', async () => {
+		// Refusing rather than reassigning: moving an identity between accounts is how one person takes
+		// over another's.
+		const { principal } = await existing();
+		const other = signIn({ provider: 'other', providerUserId: '99' }, { register: true });
+
+		if (!other.ok) throw new Error('could not create the other account');
+
+		await expect(
+			linkTrip(otherIdentity(), principal, { startedBy: principal.userId })
+		).rejects.toThrow(/already in use/);
+
+		expect(findByIdentity('other', '99')?.userId).toBe(other.principal.userId);
+	});
+
+	it('refuses an identity this same account already holds', async () => {
+		const { principal } = await existing();
+
+		await expect(
+			linkTrip(stubProvider(), principal, { startedBy: principal.userId })
+		).rejects.toThrow(/already in use/);
+	});
+
+	it('does not remember a user id for an ordinary sign-in', () => {
+		// So a cookie from a sign-in cannot be replayed as a link.
+		const { cookies, values } = jar();
+
+		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies), {
+			intent: 'sign-in',
+			userId: 'somebody'
+		});
+
+		expect(JSON.parse(values.get(PENDING_COOKIE) ?? '{}')).toMatchObject({ userId: null });
+	});
+
+	it('treats an unrecognised intent in a cookie as an ordinary sign-in', async () => {
+		// Failing towards signing somebody in is safe; failing towards attaching an identity is not.
+		const { cookies } = jar({
+			[PENDING_COOKIE]: JSON.stringify({
+				kind: 'stub',
+				state: 'abc',
+				verifier: null,
+				next: '/admin',
+				intent: 'something-else',
+				userId: 'somebody'
+			})
+		});
+
+		const completed = await completeSignIn(
+			stubProvider(),
+			requestFor('/auth/stub/callback?code=a&state=abc', cookies)
+		);
+
+		expect(completed.intent).toBe('sign-in');
 	});
 });

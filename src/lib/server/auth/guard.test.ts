@@ -150,3 +150,20 @@ describe('requireRoleForApi', () => {
 		}
 	});
 });
+
+describe('a guard called with no principal field at all', () => {
+	// `hooks.server.ts` always sets it, so this only matters when something new calls a guard with a
+	// hand-built object. The direction to fail in is "not signed in" — the alternative is an
+	// `undefined` principal that every later optional chain quietly tolerates.
+	it('redirects rather than handing back undefined', () => {
+		expect(thrownBy(() => requireSignIn({}, PAGE)).status).toBe(303);
+	});
+
+	it('redirects from requireRole', () => {
+		expect(thrownBy(() => requireRole({}, PAGE, 'member')).status).toBe(303);
+	});
+
+	it('answers 401 from the API guard', () => {
+		expect(thrownBy(() => requireRoleForApi({}, 'member')).status).toBe(401);
+	});
+});

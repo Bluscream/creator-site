@@ -37,13 +37,14 @@
 import { generateState } from 'arctic';
 import type { Cookies } from '@sveltejs/kit';
 import { DISCORD_REDIRECT_URI } from '$app/env/private';
-import { signIn } from '../accounts.js';
+import { linkIdentity, signIn } from '../accounts.js';
 import type { Principal } from '../session.js';
 import { SESSION_COOKIE, SESSION_TTL, issue, revoke, sameToken } from '../session.js';
 import { log } from '../log.js';
 import { registrationPolicy, roleFloorFor } from './policy.js';
 import { SignInFailure } from './sign-in-provider.js';
 import type { SignInProvider } from './sign-in-provider.js';
+import type { ProviderIdentity } from '../accounts.js';
 
 /**
  * The part of SvelteKit's `Cookies` this module uses.
@@ -69,6 +70,9 @@ export const PENDING_TTL = 10 * 60;
 /** Where a visitor ends up when they did not ask for anywhere in particular. */
 export const DEFAULT_DESTINATION = '/admin';
 
+/** Where somebody manages their own sign-in methods and sessions. */
+export const ACCOUNT_PATH = '/admin/account';
+
 /**
  * What a local path may contain.
  *
@@ -81,12 +85,32 @@ export const DEFAULT_DESTINATION = '/admin';
  */
 const PLAIN_PATH = /^\/[\w\-./~%?&=:@+,;!$'()*#[\]]*$/u;
 
+/**
+ * What a flow is for.
+ *
+ * `sign-in` is the ordinary case. `link` adds another way to sign in to the account that is *already*
+ * signed in, which is a different thing entirely: the identity that comes back must be attached to
+ * the existing user rather than becoming one, and an identity somebody else already holds must be
+ * refused rather than moved.
+ */
+export type Intent = 'sign-in' | 'link';
+
 /** What is remembered while the visitor is at the provider. */
 interface Pending {
 	readonly kind: string;
 	readonly state: string;
 	readonly verifier: string | null;
 	readonly next: string;
+	readonly intent: Intent;
+
+	/**
+	 * For a `link`, whose account it is for.
+	 *
+	 * Compared against who is signed in when the callback arrives, so a flow started by one person
+	 * cannot finish against another's account — which is what would happen on a shared browser where
+	 * somebody signed out and back in while the first tab was away at the provider.
+	 */
+	readonly userId: string | null;
 }
 
 /**
@@ -133,27 +157,37 @@ export function redirectUriFor(kind: string, url: URL): string {
  *
  * @returns the provider's authorization URL
  */
-export function beginSignIn(provider: SignInProvider, event: FlowRequest): URL {
+export function beginSignIn(
+	provider: SignInProvider,
+	event: FlowRequest,
+	options: { readonly intent?: Intent; readonly userId?: string } = {}
+): URL {
 	const state = generateState();
 	const redirectUri = redirectUriFor(provider.kind, event.url);
 	const { url, verifier } = provider.authorize(state, redirectUri);
+	const intent = options.intent ?? 'sign-in';
 
 	remember(event.cookies, {
 		kind: provider.kind,
 		state,
 		verifier,
-		next: safePath(event.url.searchParams.get('next'))
+		next: safePath(event.url.searchParams.get('next')),
+		intent,
+		userId: intent === 'link' ? (options.userId ?? null) : null
 	});
 
 	return url;
 }
 
-/** What finishing a sign-in produced. */
+/** What finishing a flow produced. */
 export interface CompletedSignIn {
 	readonly principal: Principal;
 
 	/** Where to send the visitor now. Already reduced by {@link safePath}. */
 	readonly next: string;
+
+	/** What the flow was for, so the caller can report "linked" rather than "signed in". */
+	readonly intent: Intent;
 }
 
 /**
@@ -165,7 +199,8 @@ export interface CompletedSignIn {
  */
 export async function completeSignIn(
 	provider: SignInProvider,
-	event: FlowRequest
+	event: FlowRequest,
+	signedIn: Principal | null = null
 ): Promise<CompletedSignIn> {
 	const pending = forget(event.cookies);
 	const code = event.url.searchParams.get('code');
@@ -194,6 +229,10 @@ export async function completeSignIn(
 		redirectUriFor(provider.kind, event.url)
 	);
 
+	if (pending.intent === 'link') {
+		return { principal: link(identity, pending, signedIn), next: pending.next, intent: 'link' };
+	}
+
 	const result = signIn(identity, registrationPolicy(), { floor: roleFloorFor(identity) });
 
 	if (!result.ok) {
@@ -208,7 +247,39 @@ export async function completeSignIn(
 
 	start(event.cookies, result.principal);
 
-	return { principal: result.principal, next: pending.next };
+	return { principal: result.principal, next: pending.next, intent: 'sign-in' };
+}
+
+/**
+ * Attaches a new identity to the account that started the flow.
+ *
+ * No session is issued: the person is already signed in, and issuing another would leave a second
+ * row behind for no reason. The checks are the ones that keep this from being a way to take over
+ * somebody's account:
+ *
+ * - the flow must have been started by whoever is signed in *now*, not merely by somebody
+ * - the identity must not already belong to anybody, including to this same account
+ */
+function link(identity: ProviderIdentity, pending: Pending, signedIn: Principal | null): Principal {
+	if (signedIn === null) {
+		throw new SignInFailure('You have to be signed in to add another way of signing in.');
+	}
+
+	if (pending.userId !== signedIn.userId) {
+		// A shared browser where somebody signed out and back in while the first tab was away at the
+		// provider. Refusing is the only safe answer: the alternative attaches one person's identity
+		// to whoever happens to hold the session now.
+		throw new SignInFailure('That request was started by a different account. Please try again.');
+	}
+
+	if (!linkIdentity(signedIn.userId, identity)) {
+		// Including when this same account already has it, where there is nothing to add. Refusing
+		// rather than reassigning, because moving an identity between accounts is how one person takes
+		// over another's.
+		throw new SignInFailure('That account is already in use for signing in here.');
+	}
+
+	return signedIn;
 }
 
 /** Ends the session the request is carrying, if any. */
@@ -280,10 +351,16 @@ function parsePending(raw: string): Pending | null {
 
 	if (typeof kind !== 'string' || typeof state !== 'string' || state === '') return null;
 
+	const { intent, userId } = value as Record<string, unknown>;
+
 	return {
 		kind,
 		state,
 		verifier: typeof verifier === 'string' ? verifier : null,
+		// Anything but the exact word is the ordinary flow. A cookie claiming an intent this version
+		// does not have should sign somebody in, not attach an identity to an account.
+		intent: intent === 'link' ? 'link' : 'sign-in',
+		userId: typeof userId === 'string' && userId !== '' ? userId : null,
 		// Re-checked on the way out as well as on the way in: this value came back from the
 		// visitor's browser, and a cookie is not a place where a check made earlier still holds.
 		next: safePath(typeof next === 'string' ? next : null)

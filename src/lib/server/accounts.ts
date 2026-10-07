@@ -26,7 +26,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, ne } from 'drizzle-orm';
 import { db } from './db/index.js';
 import { DEFAULT_ROLE, ROLES, identities, users } from './db/schema.js';
 import type { Role } from './db/schema.js';
@@ -216,6 +216,119 @@ function refreshed(principal: Principal, identity: ProviderIdentity): Principal 
 	db().update(users).set({ name, avatarUrl }).where(eq(users.id, principal.userId)).run();
 
 	return { ...principal, name, avatarUrl };
+}
+
+/** Somebody with an account, as a list of them is shown. */
+export interface Person {
+	readonly userId: string;
+	readonly name: string;
+	readonly avatarUrl: string | null;
+	readonly role: Role;
+
+	/** Unix seconds. */
+	readonly createdAt: number;
+
+	/** Which providers they can sign in with. */
+	readonly providers: readonly string[];
+}
+
+/**
+ * Everybody with an account, oldest first.
+ *
+ * Oldest first because on almost every install the first row is the owner, and a list that starts
+ * with whoever signed up most recently buries the person reading it. No paging: an installation
+ * where this is long is an installation with open registration, and paging can arrive with the first
+ * one that has it rather than being guessed at now.
+ */
+export function people(): readonly Person[] {
+	const rows = db()
+		.select({
+			id: users.id,
+			name: users.name,
+			avatarUrl: users.avatarUrl,
+			role: users.role,
+			createdAt: users.createdAt
+		})
+		.from(users)
+		.orderBy(users.createdAt)
+		.all();
+
+	const byUser = new Map<string, string[]>();
+
+	// One query for every identity rather than one per person: a list of twenty accounts should not be
+	// twenty-one round trips, even against SQLite.
+	for (const row of db()
+		.select({ userId: identities.userId, provider: identities.provider })
+		.from(identities)
+		.all()) {
+		const list = byUser.get(row.userId);
+
+		if (list === undefined) byUser.set(row.userId, [row.provider]);
+		else list.push(row.provider);
+	}
+
+	return rows.map((row) => ({
+		userId: row.id,
+		name: row.name,
+		avatarUrl: row.avatarUrl,
+		role: roleOf(row.role),
+		createdAt: row.createdAt,
+		providers: (byUser.get(row.id) ?? []).toSorted()
+	}));
+}
+
+/** Why a role change was refused. */
+export type RoleRefusal =
+	| 'no_such_user'
+	/** An install with no owner cannot be administered, and nothing else can promote one. */
+	| 'last_owner'
+	/** Changing your own role is how somebody locks themselves out by accident. */
+	| 'yourself';
+
+/**
+ * Changes somebody's role.
+ *
+ * Two refusals, and both are about not being able to undo the change:
+ *
+ * - **The last owner cannot be demoted.** An install with no owner has nobody who can promote one,
+ *   so the only way back is editing the database by hand. Transferring ownership is promoting the
+ *   new owner first, which this allows.
+ * - **Nobody changes their own role.** Not a permission rule — an owner may do anything — but a
+ *   guard rail: the mistake it prevents is a one-click, irreversible self-demotion, and the owner is
+ *   the one person who cannot be put back by anybody else.
+ *
+ * @returns null when it worked, or why it did not
+ */
+export function setRole(userId: string, role: Role, by: Principal): RoleRefusal | null {
+	if (userId === by.userId) return 'yourself';
+
+	const [existing] = db()
+		.select({ role: users.role })
+		.from(users)
+		.where(eq(users.id, userId))
+		.all();
+
+	if (existing === undefined) return 'no_such_user';
+	if (roleOf(existing.role) === 'owner' && role !== 'owner' && !anotherOwner(userId)) {
+		return 'last_owner';
+	}
+
+	db().update(users).set({ role }).where(eq(users.id, userId)).run();
+
+	log().info({ role, by: by.role }, 'role changed');
+
+	return null;
+}
+
+/** Whether somebody other than this user is an owner. */
+function anotherOwner(userId: string): boolean {
+	const [row] = db()
+		.select({ total: count() })
+		.from(users)
+		.where(and(eq(users.role, 'owner'), ne(users.id, userId)))
+		.all();
+
+	return (row?.total ?? 0) > 0;
 }
 
 /**

@@ -10,7 +10,7 @@
  * has to get through this one to see the navigation.
  */
 
-import { requireRole } from '#lib/server/auth/guard.js';
+import { atLeast, requireRole } from '#lib/server/auth/guard.js';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = ({ locals, url }) => {
@@ -18,6 +18,11 @@ export const load: LayoutServerLoad = ({ locals, url }) => {
 
 	return {
 		principal,
+
+		// Which admin pages this person may reach, so the navigation offers only what will open. A
+		// link to a page that answers 403 is worse than no link: it reads as the site being broken
+		// rather than as the page not being theirs.
+		canSeePeople: atLeast(principal.role, 'admin'),
 
 		// Where a sign-out from the admin navigation should land. Not the current page, which needs a
 		// session to view: signing out and being bounced to a sign-in page reads like the sign-out

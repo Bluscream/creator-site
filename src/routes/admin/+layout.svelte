@@ -26,6 +26,19 @@
 	let { data, children }: LayoutProps = $props();
 
 	/**
+	 * The navigation, filtered to what this person may actually open.
+	 *
+	 * Derived rather than a constant because the labels are message functions and the role decides
+	 * which entries exist. `aria-current` matches on the *end* of the path, so a localised `/de/admin`
+	 * is marked current too.
+	 */
+	const links = $derived([
+		{ href: '/admin', label: m.admin_title() },
+		{ href: '/admin/account', label: m.admin_nav_account() },
+		...(data.canSeePeople ? [{ href: '/admin/people', label: m.admin_nav_people() }] : [])
+	]);
+
+	/**
 	 * The role, in the page's language rather than as the database spelling.
 	 *
 	 * A switch rather than a lookup table keyed by role, so each message is a call rather than a
@@ -60,12 +73,14 @@
 <div class="shell">
 	<header>
 		<nav aria-label={m.nav_admin()}>
-			<a
-				href={localizeHref('/admin', {})}
-				aria-current={page.url.pathname === '/admin' ? 'page' : undefined}
-			>
-				{m.admin_title()}
-			</a>
+			{#each links as link (link.href)}
+				<a
+					href={localizeHref(link.href, {})}
+					aria-current={page.url.pathname.endsWith(link.href) ? 'page' : undefined}
+				>
+					{link.label}
+				</a>
+			{/each}
 		</nav>
 
 		<div class="who">
@@ -114,9 +129,20 @@
 		border-bottom: 1px solid;
 	}
 
+	nav {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+	}
+
 	nav a {
 		color: inherit;
 		font-weight: 600;
+	}
+
+	nav a[aria-current='page'] {
+		text-decoration-thickness: 2px;
+		text-underline-offset: 0.2em;
 	}
 
 	.who {

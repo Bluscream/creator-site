@@ -35,8 +35,17 @@ vi.mock('./log.js', () => ({
 	})
 }));
 
-const { findByIdentity, identitiesOf, isUnclaimed, linkIdentity, roleOf, signIn, unlinkIdentity } =
-	await import('./accounts.js');
+const {
+	findByIdentity,
+	identitiesOf,
+	isUnclaimed,
+	linkIdentity,
+	people,
+	roleOf,
+	setRole,
+	signIn,
+	unlinkIdentity
+} = await import('./accounts.js');
 
 const { DEFAULT_ROLE, ROLES } = await import('./db/schema.js');
 
@@ -481,5 +490,124 @@ describe('the role floor', () => {
 		);
 
 		expect(refused).toStrictEqual({ ok: false, reason: 'registration_closed' });
+	});
+});
+
+describe('people', () => {
+	it('is empty on a fresh install', () => {
+		expect(people()).toStrictEqual([]);
+	});
+
+	it('lists everybody', () => {
+		signedIn(DISCORD);
+		signedIn({ provider: 'discord', providerUserId: '2', name: 'Another' });
+
+		expect(people().map((person) => person.name)).toStrictEqual(['Someone', 'Another']);
+	});
+
+	it('carries the role, checked', () => {
+		const owner = signedIn(DISCORD);
+		database.exec('UPDATE users SET role = ? WHERE id = ?', 'superuser', owner.principal.userId);
+
+		expect(people()[0]?.role).toBe(DEFAULT_ROLE);
+	});
+
+	it('lists each person’s providers', () => {
+		const user = signedIn(DISCORD).principal.userId;
+		linkIdentity(user, { provider: 'google', providerUserId: '9' });
+
+		expect(people()[0]?.providers).toStrictEqual(['discord', 'google']);
+	});
+
+	it('gives somebody with no identities an empty list rather than undefined', () => {
+		// Not reachable through `signIn`, which creates both rows in one transaction — but a hand-edited
+		// database should not take the page down.
+		signedIn(DISCORD);
+		database.exec('DELETE FROM identities');
+
+		expect(people()[0]?.providers).toStrictEqual([]);
+	});
+
+	it('reads every identity in one query rather than one per person', () => {
+		// Twenty accounts should not be twenty-one round trips. Asserted by behaviour: every person
+		// gets their own providers and nobody gets somebody else's.
+		const first = signedIn(DISCORD).principal.userId;
+		const second = signedIn({ provider: 'discord', providerUserId: '2' }).principal.userId;
+		linkIdentity(second, { provider: 'google', providerUserId: '9' });
+
+		const byId = new Map(people().map((person) => [person.userId, person.providers]));
+
+		expect(byId.get(first)).toStrictEqual(['discord']);
+		expect(byId.get(second)).toStrictEqual(['discord', 'google']);
+	});
+});
+
+describe('setRole', () => {
+	/** An owner and somebody else, which is the shape every one of these needs. */
+	function twoPeople() {
+		const owner = signedIn(DISCORD).principal;
+		const other = signedIn({ provider: 'discord', providerUserId: '2' }).principal;
+
+		return { owner, other };
+	}
+
+	it('changes somebody’s role', () => {
+		const { owner, other } = twoPeople();
+
+		expect(setRole(other.userId, 'editor', owner)).toBeNull();
+		expect(findByIdentity('discord', '2')?.role).toBe('editor');
+	});
+
+	it('refuses a user who does not exist', () => {
+		const { owner } = twoPeople();
+
+		expect(setRole('nobody', 'editor', owner)).toBe('no_such_user');
+	});
+
+	it('refuses changing your own role', () => {
+		// Not a permission rule — an owner may do anything — but the mistake it prevents is a one-click
+		// irreversible self-demotion, and the owner is the one person nobody else can put back.
+		const { owner } = twoPeople();
+
+		expect(setRole(owner.userId, 'member', owner)).toBe('yourself');
+	});
+
+	it('writes nothing when it refuses your own role', () => {
+		const { owner } = twoPeople();
+
+		setRole(owner.userId, 'member', owner);
+
+		expect(findByIdentity('discord', '1')?.role).toBe('owner');
+	});
+
+	it('refuses demoting the only owner', () => {
+		// An install with no owner has nobody who can promote one, so the only way back is editing the
+		// database by hand.
+		const { owner, other } = twoPeople();
+
+		expect(setRole(owner.userId, 'admin', other)).toBe('last_owner');
+	});
+
+	it('allows demoting an owner once there is another', () => {
+		// Which is how ownership is transferred: promote first, then demote.
+		const { owner, other } = twoPeople();
+
+		expect(setRole(other.userId, 'owner', owner)).toBeNull();
+		expect(setRole(owner.userId, 'admin', other)).toBeNull();
+		expect(findByIdentity('discord', '1')?.role).toBe('admin');
+	});
+
+	it('allows an owner to stay an owner', () => {
+		// Setting the role it already holds is not a demotion, so the last-owner rule must not catch it.
+		const { owner, other } = twoPeople();
+
+		expect(setRole(owner.userId, 'owner', other)).toBeNull();
+	});
+
+	it('promotes somebody to owner without refusing', () => {
+		const { owner, other } = twoPeople();
+
+		expect(setRole(other.userId, 'owner', owner)).toBeNull();
+		expect(findByIdentity('discord', '2')?.role).toBe('owner');
 	});
 });

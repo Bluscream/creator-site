@@ -35,8 +35,19 @@ vi.mock('./log.js', () => ({
 	})
 }));
 
-const { SESSION_COOKIE, SESSION_TTL, issue, resolve, revoke, revokeAll, sameToken, sweep } =
-	await import('./session.js');
+const {
+	SESSION_COOKIE,
+	SESSION_TTL,
+	issue,
+	resolve,
+	revoke,
+	revokeAll,
+	revokeById,
+	sameToken,
+	sessionIdFor,
+	sessionsOf,
+	sweep
+} = await import('./session.js');
 
 const { signIn } = await import('./accounts.js');
 
@@ -416,5 +427,177 @@ describe('sameToken', () => {
 
 	it('compares bytes, not code units', () => {
 		expect(sameToken('é', 'é')).toBe(true);
+	});
+});
+
+describe('sessionsOf', () => {
+	it('is empty for somebody with none', () => {
+		expect(sessionsOf(user)).toStrictEqual([]);
+	});
+
+	it('lists a session', () => {
+		issue(user);
+
+		expect(sessionsOf(user)).toHaveLength(1);
+	});
+
+	it('identifies rows by the token hash, which is safe to show', () => {
+		// The payoff for keying the table by a hash: a page can list sessions and end one without ever
+		// handling a credential.
+		const { token } = issue(user);
+
+		expect(sessionsOf(user)[0]?.id).toBe(createHash('sha256').update(token).digest('hex'));
+	});
+
+	it('never carries a token', () => {
+		const { token } = issue(user);
+
+		expect(JSON.stringify(sessionsOf(user))).not.toContain(token);
+	});
+
+	it('marks the session that is asking', () => {
+		const mine = issue(user);
+		issue(user);
+
+		const listed = sessionsOf(user, mine.token);
+
+		expect(listed.filter((session) => session.current)).toHaveLength(1);
+	});
+
+	it('marks the right one', () => {
+		const mine = issue(user);
+		issue(user);
+
+		const current = sessionsOf(user, mine.token).find((session) => session.current);
+
+		expect(current?.id).toBe(createHash('sha256').update(mine.token).digest('hex'));
+	});
+
+	it('marks nothing when no token is given', () => {
+		issue(user);
+
+		expect(sessionsOf(user).some((session) => session.current)).toBe(false);
+	});
+
+	it('marks nothing for a token that is not one of them', () => {
+		issue(user);
+
+		expect(sessionsOf(user, 'not-a-token').some((session) => session.current)).toBe(false);
+	});
+
+	it('leaves out an expired session', () => {
+		issue(user);
+
+		advance(SESSION_TTL + 1);
+		issue(user);
+
+		expect(sessionsOf(user)).toHaveLength(1);
+	});
+
+	it('does not delete the expired one it left out', () => {
+		// This is a read. A page that silently wrote would surprise the next person who added a caller;
+		// `sweep` is what deletes.
+		issue(user);
+
+		advance(SESSION_TTL + 1);
+		sessionsOf(user);
+
+		expect(sessionRows()).toHaveLength(1);
+	});
+
+	it('leaves out somebody else’s sessions', () => {
+		const signedIn = signIn({ provider: 'discord', providerUserId: '2' }, { register: true });
+
+		if (!signedIn.ok) throw new Error('could not create the second user');
+
+		issue(signedIn.principal.userId);
+		issue(user);
+
+		expect(sessionsOf(user)).toHaveLength(1);
+	});
+
+	it('puts the most recently started first', () => {
+		const older = issue(user);
+
+		advance(60);
+		const newer = issue(user);
+
+		expect(sessionsOf(user).map((session) => session.id)).toStrictEqual([
+			sessionIdFor(newer.token),
+			sessionIdFor(older.token)
+		]);
+	});
+
+	it('moves a session up when it is used', () => {
+		// `lastSeenAt` is only written on a renewal, which is the point: the order reflects real use
+		// rather than every page view.
+		const older = issue(user);
+
+		advance(60);
+		const newer = issue(user);
+
+		advance(SESSION_TTL / 2 + 10);
+		resolve(older.token);
+
+		expect(sessionsOf(user).map((session) => session.id)).toStrictEqual([
+			sessionIdFor(older.token),
+			sessionIdFor(newer.token)
+		]);
+	});
+});
+
+describe('revokeById', () => {
+	it('ends the session it names', () => {
+		const { token } = issue(user);
+		const [listed] = sessionsOf(user);
+
+		expect(revokeById(user, listed?.id ?? '')).toBe(true);
+		expect(resolve(token)).toBeNull();
+	});
+
+	it('is false for an id that is not a session', () => {
+		expect(revokeById(user, 'nonsense')).toBe(false);
+	});
+
+	it('refuses somebody else’s session', () => {
+		// The id arrives from a form, which means from outside the trust boundary whatever the page
+		// believes it rendered. Scoping the query by user is what makes that safe.
+		const signedIn = signIn({ provider: 'discord', providerUserId: '2' }, { register: true });
+
+		if (!signedIn.ok) throw new Error('could not create the second user');
+
+		const theirs = issue(signedIn.principal.userId);
+		const [listed] = sessionsOf(signedIn.principal.userId);
+
+		expect(revokeById(user, listed?.id ?? '')).toBe(false);
+		expect(resolve(theirs.token)).not.toBeNull();
+	});
+
+	it('leaves the user’s other sessions alone', () => {
+		const phone = issue(user);
+		const laptop = issue(user);
+		const toEnd = sessionsOf(user, phone.token).find((session) => session.current);
+
+		revokeById(user, toEnd?.id ?? '');
+
+		expect(resolve(laptop.token)).not.toBeNull();
+	});
+});
+
+describe('sessionIdFor', () => {
+	it('is the id the row is keyed by', () => {
+		const { token } = issue(user);
+
+		expect(sessionIdFor(token)).toBe(sessionsOf(user)[0]?.id);
+	});
+
+	it('is not the token', () => {
+		const { token } = issue(user);
+
+		expect(sessionIdFor(token)).not.toBe(token);
+	});
+
+	it('is stable, so comparing a token against a listed id works', () => {
+		expect(sessionIdFor('abc')).toBe(sessionIdFor('abc'));
 	});
 });

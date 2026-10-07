@@ -13,6 +13,7 @@
 
 import { error, redirect } from '@sveltejs/kit';
 import { SIGN_IN_PATH } from '#lib/server/auth/guard.js';
+import { ACCOUNT_PATH } from '#lib/server/auth/flow.js';
 import { completeSignIn } from '#lib/server/auth/flow.js';
 import { SignInFailure } from '#lib/server/auth/sign-in-provider.js';
 import { signInProvider } from '#lib/server/auth/sign-in-registry.js';
@@ -27,7 +28,9 @@ export const GET: RequestHandler = async (event) => {
 	let destination: string;
 
 	try {
-		destination = (await completeSignIn(provider, event)).next;
+		// The signed-in principal, for a `link` flow — which attaches the identity that comes back to
+		// the account already in use rather than signing in as it.
+		destination = (await completeSignIn(provider, event, event.locals.principal)).next;
 	} catch (cause) {
 		// A `SignInFailure` is a message written to be read by the person who hit it. Anything else is
 		// a bug, and is logged with its cause and reported as the same sentence — a visitor cannot act
@@ -39,7 +42,11 @@ export const GET: RequestHandler = async (event) => {
 		const reason =
 			cause instanceof SignInFailure ? cause.message : 'Something went wrong signing in.';
 
-		redirect(303, `${SIGN_IN_PATH}?reason=${encodeURIComponent(reason)}`);
+		// Somebody already signed in was adding another way to sign in, not signing in. Sending them to
+		// the sign-in page would read as "you have been signed out", which is both alarming and untrue.
+		const page = event.locals.principal === null ? SIGN_IN_PATH : ACCOUNT_PATH;
+
+		redirect(303, `${page}?reason=${encodeURIComponent(reason)}`);
 	}
 
 	redirect(303, destination);

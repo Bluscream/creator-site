@@ -27,7 +27,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { and, eq, lt, not } from 'drizzle-orm';
+import { and, desc, eq, lt, not } from 'drizzle-orm';
 import { roleOf } from './accounts.js';
 import { db } from './db/index.js';
 import { sessions, users } from './db/schema.js';
@@ -243,4 +243,76 @@ export function revokeAll(userId: string, options?: { readonly except?: string }
  */
 export function sweep(): number {
 	return db().delete(sessions).where(lt(sessions.expiresAt, now())).run().changes;
+}
+
+/** One session, as a "your devices" list shows it. */
+export interface SessionSummary {
+	/** The row's id — the token's hash. Safe to show and to submit back: it is not a credential. */
+	readonly id: string;
+
+	/** Unix seconds. */
+	readonly createdAt: number;
+	readonly lastSeenAt: number;
+	readonly expiresAt: number;
+
+	/** Whether this is the session making the request. */
+	readonly current: boolean;
+}
+
+/**
+ * Every live session a user has, most recently used first.
+ *
+ * The *hash* is what identifies a row here, and showing it is deliberate rather than careless: it
+ * cannot be turned back into a cookie, so a page can list sessions and let one be ended without ever
+ * handling a credential. That is the whole reason the primary key is a hash.
+ *
+ * Expired rows are left out rather than deleted. This is a read, and a page that silently wrote
+ * would be a surprise to the next person who added a caller.
+ */
+export function sessionsOf(userId: string, current?: string): readonly SessionSummary[] {
+	const at = now();
+	const key = current === undefined ? null : keyFor(current);
+
+	return db()
+		.select({
+			id: sessions.id,
+			createdAt: sessions.createdAt,
+			lastSeenAt: sessions.lastSeenAt,
+			expiresAt: sessions.expiresAt
+		})
+		.from(sessions)
+		.where(eq(sessions.userId, userId))
+		.orderBy(desc(sessions.lastSeenAt))
+		.all()
+		.filter((row) => row.expiresAt > at)
+		.map((row) => ({ ...row, current: row.id === key }));
+}
+
+/**
+ * Ends one session of a user's, by its row id.
+ *
+ * Scoped to the user, so an id belonging to somebody else is not found rather than deleted. The id
+ * arrives from a form, which means it arrives from outside the trust boundary whatever the page
+ * believes it put there.
+ *
+ * @returns whether a session ended
+ */
+export function revokeById(userId: string, id: string): boolean {
+	return (
+		db()
+			.delete(sessions)
+			.where(and(eq(sessions.id, id), eq(sessions.userId, userId)))
+			.run().changes > 0
+	);
+}
+
+/**
+ * The row id a token maps to.
+ *
+ * Exported for the one caller that has a token and needs to compare it against a row id it already
+ * holds — the account page marking which listed session is the current one. Not a way to look a
+ * session up: {@link resolve} is that, and it also checks the expiry and the user.
+ */
+export function sessionIdFor(token: string): string {
+	return keyFor(token);
 }

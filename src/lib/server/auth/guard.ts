@@ -27,6 +27,16 @@ import { ROLES } from '../db/schema.js';
 import type { Role } from '../db/schema.js';
 import type { Principal } from '../session.js';
 
+/**
+ * What a guard needs from `event.locals`.
+ *
+ * Optional as well as nullable, so a caller that forgot to resolve the session is refused rather
+ * than handed an `undefined` principal that every later `?.` quietly tolerates.
+ */
+interface Signed {
+	readonly principal?: Principal | null;
+}
+
 /** Where an unauthenticated visitor is sent. */
 export const SIGN_IN_PATH = '/auth/sign-in';
 
@@ -49,11 +59,13 @@ export function atLeast(held: Role, needed: Role): boolean {
  * `next` carries where they were going, so somebody who follows a link to a page deep in the admin
  * lands there rather than on a dashboard, having forgotten what they came for.
  */
-export function requireSignIn(
-	locals: { readonly principal: Principal | null },
-	url: URL
-): Principal {
-	if (locals.principal !== null) return locals.principal;
+export function requireSignIn(locals: Signed, url: URL): Principal {
+	const { principal } = locals;
+
+	// `!= null` in spirit: an absent `principal` has to be refused as well as an explicitly null one.
+	// `hooks.server.ts` always sets it, so this only matters when something new calls a guard with a
+	// hand-built object — and the direction to fail in is "not signed in".
+	if (principal !== null && principal !== undefined) return principal;
 
 	redirect(303, `${SIGN_IN_PATH}?next=${encodeURIComponent(url.pathname + url.search)}`);
 }
@@ -65,11 +77,7 @@ export function requireSignIn(
  * in, so sending them to sign in again is a loop, and the honest answer is that this is not theirs
  * to see.
  */
-export function requireRole(
-	locals: { readonly principal: Principal | null },
-	url: URL,
-	needed: Role
-): Principal {
+export function requireRole(locals: Signed, url: URL, needed: Role): Principal {
 	const principal = requireSignIn(locals, url);
 
 	if (!atLeast(principal.role, needed)) {
@@ -85,13 +93,10 @@ export function requireRole(
  * 401 for "sign in" and 403 for "not you", which is the distinction a client can act on — the first
  * means try again with a session, the second means do not bother.
  */
-export function requireRoleForApi(
-	locals: { readonly principal: Principal | null },
-	needed: Role
-): Principal {
+export function requireRoleForApi(locals: Signed, needed: Role): Principal {
 	const { principal } = locals;
 
-	if (principal === null) error(401, 'Not signed in.');
+	if (principal === null || principal === undefined) error(401, 'Not signed in.');
 	if (!atLeast(principal.role, needed)) error(403, 'Not allowed.');
 
 	return principal;
