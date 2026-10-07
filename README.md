@@ -15,10 +15,12 @@ configured.
 > **Status: early.** In: the API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`,
 > `/api/posts`), the chat page, the configuration document layer, and the container.
 >
-> Not in: the admin, the links page, the calendar, and one of the five post source kinds — `twitch`
-> is configurable but reports that it has no reader yet. There
-> is no schema in the database and nothing writes to it. Nothing here is deployable as a finished
-> site.
+> All five post source kinds now read. `twitch` is the one whose reader has never been run against
+> the live API — it needs credentials this repository does not have — so treat it as written and
+> tested rather than proven.
+>
+> Not in: the admin, the links page, and the calendar. There is no schema in the database and
+> nothing writes to it. Nothing here is deployable as a finished site.
 
 ## Running it
 
@@ -148,13 +150,19 @@ them. So beneath the capability there is a second seam whose unit is a **source 
 registry maps a kind to the reader for it rather than choosing one
 (`src/lib/server/providers/posts-source.ts`).
 
-| kind      | how it is read                                         | needs           | state     |
-| --------- | ------------------------------------------------------ | --------------- | --------- |
-| `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built** |
-| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built** |
-| `bluesky` | the public AppView, unauthenticated                    | nothing         | **built** |
-| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | **built** |
-| `twitch`  | the official Helix API — videos and clips              | two credentials | planned   |
+| kind      | how it is read                                         | needs           | state                   |
+| --------- | ------------------------------------------------------ | --------------- | ----------------------- |
+| `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built**, run live     |
+| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built**, run live     |
+| `bluesky` | the public AppView, unauthenticated                    | nothing         | **built**, run live     |
+| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | **built**, run live     |
+| `twitch`  | the official Helix API — videos and clips              | two credentials | **built**, not run live |
+
+"Run live" means the reader has been pointed at the real endpoint and its output checked, which is
+how three separate bugs in this table's readers were found. `twitch` is the exception: it needs an
+application's client id and secret, so its tests mock the credentials and assert against the shapes
+Helix documents. The token dance, the one retry on a 401 and the rule that no error body is ever
+repeated are all covered; that the live API agrees is not yet established.
 
 There is no single API for "this creator's posts everywhere", and the services that come closest are
 paid, per-seat and want OAuth against each platform — a monthly bill and a credential store for
@@ -176,11 +184,21 @@ it fails that one source with a message naming both possible causes rather than 
 also derives each date from the id, because the payload carries no timestamp at all — and that is
 what re-sorts the pinned videos TikTok lists first and does not mark.
 
+**Twitch needs two credentials, and reports itself unusable without them.** `TWITCH_CLIENT_ID` and
+`TWITCH_CLIENT_SECRET`, from an application at [dev.twitch.tv](https://dev.twitch.tv/console/apps).
+The client-credentials grant needs no user sign-in, no redirect and no refresh token, which is what
+makes a real API cheaper here than a scraper. Adding the source before the credentials is harmless:
+it says what to set, and the rest of the feed carries on. This is also the one reader where an error
+message could leak a credential — Helix echoes the request on some errors and the request carries
+the client id — so a failure reports the status and never the body, and a test asserts it.
+
 **A kind with no reader yet still answers.** It reports a reason naming what will read it, which
 appears in that source's entry in `/api/posts`. A missing registry entry would instead make a
 configured source contribute nothing — indistinguishable from a platform that has gone quiet. The
 registry's two tables are a partition over every kind, asserted by a test, so adding a kind forces
-the decision rather than allowing the omission.
+the decision rather than allowing the omission. Every kind has a reader today, so that fallback is
+reached by nothing — it is kept, and tested directly, for the next kind rather than deleted along
+with its last user.
 
 **Each source is cached separately**, which is the load-bearing decision. YouTube's feed endpoint
 throttles by IP and answers **404 rather than 429**, so an identical request returns 200 once and

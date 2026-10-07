@@ -106,6 +106,10 @@ function context(cache: Cache): SourceContext {
 	return {
 		async fetch(url, init) {
 			return fetch(url, {
+				// Forwarded so a provider whose read path needs a POST — an OAuth token grant — goes
+				// through the same deadline and user agent as everything else rather than around it.
+				...(init?.method === undefined ? {} : { method: init.method }),
+				...(init?.body === undefined ? {} : { body: init.body }),
 				headers: { 'user-agent': USER_AGENT, accept: ACCEPT, ...init?.headers },
 				// Followed, but only to somewhere this would have gone anyway. `follow` is the
 				// default; the cap is what stops a redirect loop costing the whole deadline.

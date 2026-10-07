@@ -54,7 +54,21 @@ export interface SourceContext {
 	 */
 	fetch(
 		url: string,
-		init?: { readonly headers?: Readonly<Record<string, string>> }
+		init?: {
+			readonly headers?: Readonly<Record<string, string>>;
+
+			/**
+			 * `POST` only, and only where a provider's *read* path needs one.
+			 *
+			 * Reading posts is a GET; this exists for the one case where it is not, an OAuth
+			 * client-credentials grant, which is a POST by specification. Narrowed to the single verb
+			 * on purpose — a provider reaching for `DELETE` is doing something this seam is not for.
+			 */
+			readonly method?: 'POST';
+
+			/** Already encoded by the caller, since only the caller knows the content type. */
+			readonly body?: string;
+		}
 	): Promise<Response>;
 
 	/**

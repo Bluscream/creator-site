@@ -1,10 +1,15 @@
 /**
  * Which provider reads which kind of source.
  *
+ * **Every kind has a reader now**, so {@link PLANNED} is empty and {@link notYetRead} is reached by
+ * nothing. Both stay, because what they are for has not happened yet rather than having stopped
+ * being true: they are the machinery that makes adding the *next* kind a decision instead of an
+ * omission. A test exercises `notYetRead` directly, since no kind reaches it any more.
+ *
  * ### Why an unimplemented kind is a provider rather than a hole
  *
- * Not every kind has a reader yet. The ones that do not still answer — with a provider whose
- * `unusable` explains itself — rather than being absent from the map.
+ * A kind with no reader still answers — with a provider whose `unusable` explains itself — rather
+ * than being absent from the map.
  *
  * That is the difference between a feed that is honestly incomplete and one that is quietly wrong.
  * A missing entry would mean a configured source silently contributing nothing, which looks
@@ -19,12 +24,14 @@
  *
  * {@link READERS} and {@link PLANNED} between them must name every kind exactly once, and a test
  * asserts it. That is what makes adding a kind to `POST_SOURCE_KINDS` a decision rather than an
- * omission: whoever adds one has to either write its reader or say what will.
+ * omission: whoever adds one has to either write its reader or say what will. Today the partition
+ * happens to be the whole of one table and none of the other, which is the state it was aiming at.
  */
 
 import { blueskySourceProvider } from './bluesky-source.js';
 import { feedSourceProvider } from './feed-source.js';
 import { tiktokSourceProvider } from './tiktok-source.js';
+import { twitchSourceProvider } from './twitch-source.js';
 import { youtubeSourceProvider } from './youtube-source.js';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
 import type { PostSourceKind } from './posts-kinds.js';
@@ -35,7 +42,8 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
 	feed: feedSourceProvider,
 	youtube: youtubeSourceProvider,
 	bluesky: blueskySourceProvider,
-	tiktok: tiktokSourceProvider
+	tiktok: tiktokSourceProvider,
+	twitch: twitchSourceProvider
 };
 
 /**
@@ -43,14 +51,20 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
  *
  * The value is a phrase completing "it will use …", so the message an admin sees says what is
  * coming rather than only what is missing.
+ *
+ * Empty, because every kind in `POST_SOURCE_KINDS` now has a reader. An entry belongs here when a
+ * kind is added to the schema ahead of the code to read it — which is the supported order, and the
+ * reason this table is not deleted along with its last row.
  */
-const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {
-	// Three requests on a cold cache: an app token, the broadcaster's numeric id, then the videos.
-	twitch: 'the official Helix API'
-};
+const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {};
 
-/** A kind that is configurable but has no reader yet. */
-function notYetRead(kind: PostSourceKind): PostsSourceProvider {
+/**
+ * A kind that is configurable but has no reader yet.
+ *
+ * Exported for its test: no kind reaches this through {@link postsSourceProvider} any more, and an
+ * unreachable fallback that nothing exercises is one that quietly rots until the day it is needed.
+ */
+export function notYetRead(kind: PostSourceKind): PostsSourceProvider {
 	const plan = PLANNED[kind];
 
 	return {

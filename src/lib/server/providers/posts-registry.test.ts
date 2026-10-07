@@ -7,10 +7,26 @@
  * than shipping a kind an installer can configure and that then contributes nothing.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
-import { implementedKinds, plannedKinds, postsSourceProvider } from './posts-registry.js';
+import {
+	implementedKinds,
+	notYetRead,
+	plannedKinds,
+	postsSourceProvider
+} from './posts-registry.js';
 import type { ResolvedSource } from './post.js';
+
+/**
+ * Credentials, so this does not depend on the machine it runs on.
+ *
+ * Twitch reports itself unusable without `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET`, which is
+ * correct behaviour and would make the assertions below pass or fail according to whether the
+ * developer happens to have them set. What is under test here is the registry, not configuration.
+ */
+vi.mock('./credentials.js', () => ({
+	credentialsFor: () => ({ clientId: 'test-client-id', clientSecret: 'test-client-secret' })
+}));
 
 /**
  * A target each kind's reader accepts.
@@ -56,6 +72,63 @@ describe('the two registry tables', () => {
 		// Guards the degenerate case where everything is "planned" and the feed is entirely inert.
 		expect(implementedKinds().length).toBeGreaterThan(0);
 	});
+
+	it('leave nothing unplanned, which is the state this was aiming at', () => {
+		// Every kind reads today. Stated as its own assertion rather than left implied by the
+		// partition, so that losing a reader fails here with a name rather than somewhere downstream.
+		expect(implementedKinds().toSorted()).toStrictEqual([...POST_SOURCE_KINDS].toSorted());
+		expect(plannedKinds()).toStrictEqual([]);
+	});
+});
+
+/**
+ * The fallback for a kind with no reader.
+ *
+ * Tested directly because nothing reaches it through the registry any more — every kind is
+ * implemented. An unexercised fallback is one that rots until the day somebody needs it, which by
+ * definition is the day it must work.
+ */
+describe('the fallback for a kind nobody has written yet', () => {
+	/** A kind that is not in `POST_SOURCE_KINDS`, which is the whole point of the cast. */
+	const future = 'mastodon' as (typeof POST_SOURCE_KINDS)[number];
+
+	const unwritten: ResolvedSource = {
+		id: 'probe',
+		kind: future,
+		target: 'someone',
+		label: 'Probe',
+		platform: null
+	};
+
+	it('says there is no reader, rather than returning nothing', () => {
+		// With no entry in `PLANNED` there is no plan to name, so it says the plain thing. A source
+		// contributing zero posts silently is indistinguishable from a platform gone quiet.
+		expect(notYetRead(future).unusable(unwritten)).toMatch(/no reader/i);
+	});
+
+	it('names what will read it when there is a plan', () => {
+		// The message an admin sees should say what is coming, not only what is missing. `PLANNED` is
+		// empty today, so this asserts the shape of the sentence a future entry produces.
+		const reason = notYetRead(future).unusable(unwritten);
+
+		expect(reason).not.toBeNull();
+		expect(reason).toMatch(/\.$/);
+	});
+
+	it('throws rather than answering, if it is read anyway', async () => {
+		// Reaching `read` means the orchestrator skipped its `unusable` check, which is a bug. An
+		// empty list would be a silently wrong answer; an exception is a reported one.
+		await expect(
+			Promise.resolve().then(() =>
+				notYetRead(future).read(unwritten, {
+					fetch: () => {
+						throw new Error('must not fetch');
+					},
+					store: { get: () => Promise.resolve(null), put: () => Promise.resolve() }
+				})
+			)
+		).rejects.toThrow(/no reader/);
+	});
 });
 
 describe('every kind', () => {
@@ -75,34 +148,5 @@ describe('every kind', () => {
 			// what is coming rather than only that something is missing.
 			expect(reason).toMatch(/not built yet — it will use .+/);
 		}
-	});
-});
-
-describe('a kind with no reader', () => {
-	it('throws rather than returning nothing if it is read anyway', async () => {
-		const planned = plannedKinds()[0];
-
-		if (planned === undefined) {
-			// Everything is implemented, which is the goal. Nothing to assert.
-			expect(plannedKinds()).toStrictEqual([]);
-
-			return;
-		}
-
-		// An empty list would be a silently wrong answer indistinguishable from a quiet platform.
-		// Reaching here at all means the orchestrator skipped its `unusable` check, which is a bug.
-		await expect(
-			Promise.resolve().then(() =>
-				postsSourceProvider(planned).read(sourceOf(planned), {
-					fetch: () => {
-						throw new Error('must not fetch');
-					},
-					store: {
-						get: () => Promise.resolve(null),
-						put: () => Promise.resolve()
-					}
-				})
-			)
-		).rejects.toThrow(/no reader/);
 	});
 });
