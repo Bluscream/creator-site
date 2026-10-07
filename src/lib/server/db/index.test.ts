@@ -28,11 +28,15 @@
  * wrapping it.
  */
 
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { sql } from 'drizzle-orm';
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PRAGMAS } from './index.js';
 
 /**
  * A table that exists only here.
@@ -93,5 +97,80 @@ describe('the better-sqlite3 native binding', () => {
 		expect(() => database.insert(probe).values({ id: 1, label: 'again' }).run()).toThrow(
 			/UNIQUE constraint failed/
 		);
+	});
+});
+
+/**
+ * That the connection settings in {@link PRAGMAS} are the ones that matter, and that they take.
+ *
+ * SQLite applies pragmas per connection and silently ignores one it does not understand — a
+ * misspelling, or a build without the feature. `foreign_keys` is the dangerous one: it defaults to
+ * *off*, so without it `onDelete: 'cascade'` does nothing at all and deleting a user leaves their
+ * sessions behind, resolvable until they expire. Nothing reports that; it just quietly is not true.
+ *
+ * Applied to a throwaway database rather than through `db()`, for the reason given at the top: a
+ * test must not create the configured database file as a side effect.
+ */
+describe('the connection pragmas', () => {
+	/** A throwaway database with {@link PRAGMAS} applied, as `db()` applies them. */
+	function openConfigured(): Database.Database {
+		handle = new Database(':memory:');
+
+		for (const pragma of PRAGMAS) handle.pragma(pragma);
+
+		return handle;
+	}
+
+	it('enables foreign keys, which SQLite does not do by default', () => {
+		expect(openConfigured().pragma('foreign_keys', { simple: true })).toBe(1);
+	});
+
+	it('actually cascades a delete once they are on', () => {
+		// The assertion the rest of the schema depends on. Checking the pragma reads back as 1 says the
+		// setting took; this says the setting does what it is there for.
+		const database = openConfigured();
+
+		database.exec('create table parent (id text primary key not null)');
+		database.exec(
+			'create table child (id text primary key not null, parent text not null references parent(id) on delete cascade)'
+		);
+		database.prepare('insert into parent (id) values (?)').run('p');
+		database.prepare('insert into child (id, parent) values (?, ?)').run('c', 'p');
+
+		database.prepare('delete from parent where id = ?').run('p');
+
+		expect(database.prepare('select id from child').all()).toStrictEqual([]);
+	});
+
+	it('rejects a reference to a row that does not exist', () => {
+		const database = openConfigured();
+
+		database.exec('create table parent (id text primary key not null)');
+		database.exec(
+			'create table child (id text primary key not null, parent text not null references parent(id))'
+		);
+
+		expect(() =>
+			database.prepare('insert into child (id, parent) values (?, ?)').run('c', 'missing')
+		).toThrow(/FOREIGN KEY constraint failed/);
+	});
+
+	it('puts the journal in WAL mode, so a reader and a writer do not block each other', () => {
+		// A request that renews a session is a writer, and in the default rollback journal it would
+		// block every concurrent read of the same file.
+		//
+		// On a file rather than `:memory:`, which reports `memory` and cannot be WAL at all — so this
+		// is the one pragma that has to be checked against something resembling the real deployment.
+		const path = join(mkdtempSync(join(tmpdir(), 'creator-site-db-')), 'probe.db');
+
+		handle = new Database(path);
+
+		for (const pragma of PRAGMAS) handle.pragma(pragma);
+
+		expect(handle.pragma('journal_mode', { simple: true })).toBe('wal');
+	});
+
+	it('waits for a busy database rather than throwing at whoever was second', () => {
+		expect(openConfigured().pragma('busy_timeout', { simple: true })).toBe(5000);
 	});
 });

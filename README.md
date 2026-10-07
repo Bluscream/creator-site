@@ -20,8 +20,12 @@ configured.
 > the live API — it needs credentials this repository does not have — so treat it as written and
 > tested rather than proven.
 >
-> Not in: the admin, the links page, and the calendar. There is no schema in the database and
-> nothing writes to it. Nothing here is deployable as a finished site.
+> Accounts and sessions are in the database, with migrations that apply themselves on startup. The
+> sign-in flow itself — the OAuth round trip that produces an identity — is not written yet, so
+> nothing creates an account through the web interface.
+>
+> Not in: the admin, the links page, and the calendar. Nothing here is deployable as a finished
+> site.
 
 ## Running it
 
@@ -30,19 +34,19 @@ npm install
 npm run dev
 ```
 
-|                     |                                                              |
-| ------------------- | ------------------------------------------------------------ |
-| **`npm run gate`**  | **the whole gate — run this before claiming anything works** |
-| `npm run dev`       | development server with HMR                                  |
-| `npm run build`     | production build (`@sveltejs/adapter-node`)                  |
-| `npm run preview`   | serve the production build locally                           |
-| `npm run check`     | `svelte-check` over the whole project                        |
-| `npm run lint`      | Prettier check and ESLint                                    |
-| `npm run format`    | rewrite with Prettier                                        |
-| `npm run test:unit` | Vitest                                                       |
-| `npm run test:e2e`  | Playwright                                                   |
-| `npm run db:push`   | apply the Drizzle schema to the database                     |
-| `npm run db:studio` | browse the database                                          |
+|                       |                                                              |
+| --------------------- | ------------------------------------------------------------ |
+| **`npm run gate`**    | **the whole gate — run this before claiming anything works** |
+| `npm run dev`         | development server with HMR                                  |
+| `npm run build`       | production build (`@sveltejs/adapter-node`)                  |
+| `npm run preview`     | serve the production build locally                           |
+| `npm run check`       | `svelte-check` over the whole project                        |
+| `npm run lint`        | Prettier check and ESLint                                    |
+| `npm run format`      | rewrite with Prettier                                        |
+| `npm run test:unit`   | Vitest                                                       |
+| `npm run test:e2e`    | Playwright                                                   |
+| `npm run db:generate` | generate a migration from a schema change                    |
+| `npm run db:studio`   | browse the database                                          |
 
 Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same major).
 
@@ -321,6 +325,64 @@ writes 25 documents in a loop caught it keeping a version older than the window.
 the read cache explicitly, because a `rename` inside one tick can change neither mtime nor size, so
 the next read would otherwise serve what was just replaced.
 
+## Accounts: a person, their identities, and revocable sessions
+
+Three tables (`src/lib/server/db/schema.ts`), and four decisions worth stating.
+
+**A person is not a Discord account.** `users` holds who somebody is and what they may do;
+`identities` holds each way they sign in, unique on `(provider, provider_user_id)`. Somebody who
+signs in with Discord today and adds another provider tomorrow is one account, and the thing that
+owns their role is neither provider. The uniqueness is a database index rather than a
+check-then-insert, because two sign-ins arriving together would both pass the check.
+
+**The session token is never stored.** The cookie carries 32 random bytes; the row's primary key is
+their SHA-256. A database that leaks therefore leaks nothing usable — an attacker holding every row
+cannot build a cookie, because the hash does not reverse. Resolving a session is hashing the cookie
+and selecting by primary key, the same single-row lookup storing it plainly would have been, so the
+property costs one hash. What rows buy over a signed cookie is revocation: signing out on a shared
+machine has to invalidate the session rather than ask whoever holds it to stop presenting it.
+
+Sessions last 30 days and slide — renewed when more than halfway through, so a creator who posts
+weekly is never signed out while an abandoned browser still expires. Renewing on every request
+would make every page view a write.
+
+**The first account on an unclaimed install becomes the owner**, and registration is otherwise off
+until someone turns it on. That is how first-run setup works without a password printed in a log or
+baked into an environment variable. It is a real exposure window on a fresh install reachable from
+the internet, and naming it is better than pretending otherwise: whoever signs in first owns the
+site. The window closes at the first sign-in.
+
+**A stored role is checked, not trusted.** The column is a typed string, not a constraint, so a row
+holding something that is not a role — a hand edit, a downgrade from a version that added one —
+resolves to the narrowest role and says so in the log. Failing closed is the only safe direction for
+a value that decides what somebody may do.
+
+### Migrations apply themselves
+
+`drizzle/` holds generated migrations, committed, and `src/lib/server/db/migrate.ts` applies them
+when the connection opens. Not `drizzle-kit push`, which recomputes a diff each time and turns a
+column rename into a drop and an add on somebody else's data; and not a deploy step, because a deploy
+step is a thing a self-hoster has to know about and the failure mode of not knowing is a 500 on every
+page. `docker compose up` on a new version is the whole upgrade.
+
+Two instances starting at once would both try; SQLite serialises them and the second finds the
+journal already says those migrations are applied. This product is one SQLite file on one disk, and
+if that ever stops being true, this is one of the places that has to change.
+
+`src/lib/server/db/migrate.test.ts` applies the committed migrations to an empty database and
+compares every column, type, null-ness, default and index against the test fixture's own DDL — which
+is how a forgotten `npm run db:generate` fails the gate instead of failing an upgrade.
+
+### The pragmas are not optional
+
+SQLite defaults foreign keys **off**, per connection. Without `PRAGMA foreign_keys = ON` the
+`onDelete: 'cascade'` the schema relies on does nothing at all, and nothing reports it: deleting a
+user would leave their sessions behind, resolvable until they expired. `journal_mode = WAL` because a
+request that renews a session is a writer and would otherwise block concurrent readers, and
+`busy_timeout` so a second writer waits rather than throwing. All three are asserted in
+`src/lib/server/db/index.test.ts`, including that the cascade actually fires — a pragma SQLite does
+not understand is ignored silently.
+
 ## Live updates: SSE out, one socket in
 
 The live parts of the page — the chat overlay, the support toasts, the live badge — are pushed, not
@@ -515,7 +577,8 @@ choice:
 ```
 src/lib/server/              server-only code — the bundler refuses to ship it to the browser
 src/lib/server/providers/    the capability seams; add a provider by adding a factory
-src/lib/server/db/           the SQLite connection and the Drizzle schema
+src/lib/server/db/           the SQLite connection, the Drizzle schema and the migrator
+drizzle/                     generated migrations — committed, and applied on startup
 src/lib/components/          Svelte components
 src/lib/                     shared between server and client — domain types live here
 src/routes/                  pages and API routes

@@ -33,7 +33,7 @@
 #
 #   185 MB  `node:26-alpine` — mostly the Node binary. The slimmest official image there is.
 #    67 MB  production `node_modules`, of which `better-sqlite3` is 26 MB and `drizzle-orm` 17 MB
-#     3 MB  the build output
+#     3 MB  the build output and the migration files
 #
 # So roughly three quarters is the base image. Two things were considered and rejected:
 #
@@ -94,6 +94,11 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY --from=build /app/build ./build
+
+# The migration files, read at runtime by `src/lib/server/db/migrate.ts` when the connection opens.
+# Not part of the build output — the migrator takes a folder on disk, not a bundled import — so
+# without this an upgraded container starts and then fails every request with `no such table`.
+COPY --from=build /app/drizzle ./drizzle
 
 USER node
 
