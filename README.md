@@ -93,9 +93,11 @@ service behind it is a deployment's choice.
 | `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast    |
 | `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat             |
 | `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall |
+| `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver               |
 
 **One interface per capability, not one per provider.** Owncast can answer "am I live" and nothing
-else; Twitch can do live and chat but knows nothing about donations; Ko-fi knows only donations. A
+else; Twitch can do live and chat but knows nothing about donations; Ko-fi knows only donations; a
+service may be able to push events without being able to answer for a backlog, or the reverse. A
 single `Provider` interface would force most of them to stub out most of it, and would make "does
 this deployment have chat?" unanswerable without trying it. A provider implements what it can and
 declares which in its descriptor.
@@ -125,6 +127,40 @@ guarantees is the seam: adding Restream means adding a factory to one array, and
 `src/lib/server/providers/` changes. The selection rules are tested against stand-in providers, so
 "prefers the configured one over a merely usable one" is checked even though only Synchra is real.
 
+## Live updates: SSE out, one socket in
+
+The live parts of the page — the chat overlay, the support toasts, the live badge — are pushed, not
+polled. `GET /api/events?topics=chat,activity,live` is a Server-Sent Events stream; the event name
+is the topic, and the payload is the **same shape the matching REST endpoint returns**, so a client
+fetches the backlog from `/api/chat` and then streams with one renderer and one set of field names.
+
+**SSE rather than WebSockets.** The traffic is entirely server→browser; SvelteKit 3 has no WebSocket
+support at all (`adapter-node` exposes no upgrade hook), so a socket would mean a second listener and
+a second deploy unit; and `EventSource` reconnects and replays `Last-Event-ID` with no client code.
+It also stays plain HTTP, so the tunnel, the `/api/` routing and the caching rules apply unchanged.
+What would change this is the viewer _typing into_ the site — fan chat, live polls. Not before.
+
+**One socket upstream, held by the server.** The provider's token never reaches a browser, the
+upstream sees one client rather than one per visitor, and there is one reconnect implementation
+instead of one per tab. It opens in the `init` hook, because the server also has to learn that a
+stream went live when nobody has the page open.
+
+**A deployment with no event provider is a normal deployment.** The endpoint still accepts
+connections — it heartbeats and stays silent — and the pages poll as they did before any of this
+existed. Refusing the connection would make every client branch on something it cannot see.
+
+Two details that are invisible when wrong, so both are tested:
+
+- **The heartbeat.** Without a comment every 20 s, Cloudflare drops an idle stream. With no
+  heartbeat everything works locally, works under test, and dies behind a proxy after a minute of
+  quiet. The interval is asserted _as passed to the session_, not as a constant — those differ.
+- **Deregistration.** `better-sse` learns a client went away from the request's `AbortSignal` and
+  from nothing else. SvelteKit wires that to the socket closing, so a real browser does deregister;
+  a session that did not would grow the fan-out forever on a public page.
+
+Only one SvelteKit instance is assumed. A second one is what forces a shared bus (Redis, Postgres
+`LISTEN`) — a deployment change, not a transport change.
+
 ## Libraries over reimplementation
 
 **If a maintained library does the whole job, it does the job.** Four modules ported from the PHP
@@ -137,6 +173,12 @@ it translated:
 | `Platform.php` — hand-written WCAG luminance, a darken-by-0.85 loop           | `culori` ([`src/lib/color.ts`](src/lib/color.ts))   | the maths, and a latent bug: scaling sRGB channels drifts the hue, and the loop aimed at a luminance threshold as a _proxy_ for a contrast ratio. The ratio is now the condition, and lightness moves in OKLCH. |
 | `Config.php` — `.env` parsing, `getenv` fallback, readability checks          | `defineEnvVars` + zod ([`src/env.ts`](src/env.ts))  | all of the parsing. A variable is now declared: validated at startup, typed where used, documented on hover.                                                                                                    |
 | `Log.php` — tab-separated format, size rotation, backwards block-walking tail | `pino` + `rotating-file-stream` + `read-last-lines` | the format, the rotation and the tail reader — and "never log a token" stopped being a rule to remember (see below).                                                                                            |
+
+The same rule decided the transport. `better-sse` is the SSE server side — channels, heartbeat,
+`Last-Event-ID` replay, spec-compliant framing, no dependencies, and it speaks the Fetch API so a
+route returns its `Response` directly. An in-process event bus in front of it would have been a
+second registry of the same sessions kept in step by hand, so there is **no bus**: one channel per
+topic, and `publish()`/`register()` are the whole interface.
 
 Two choices inside that worth knowing:
 

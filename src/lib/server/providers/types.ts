@@ -10,6 +10,7 @@
  * | `live` | Synchra · Restream · Twitch Helix · YouTube Data · Kick · Owncast |
  * | `chat` | Synchra · Restream · Twitch EventSub · YouTube live chat |
  * | `activity` | Synchra · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall |
+ * | `events` | Synchra gateway · Twitch EventSub · a webhook receiver |
  *
  * ### One interface per capability, not one per provider
  *
@@ -29,11 +30,12 @@
 
 import type { Activity } from '#lib/activity.js';
 import type { Chat } from '#lib/chat.js';
+import type { SiteEvent } from '#lib/events.js';
 import type { LiveStatus } from '#lib/live.js';
 import type { Credential } from '#lib/server/providers/credentials.js';
 
 /** The things a provider can do. */
-export const CAPABILITIES = ['live', 'chat', 'activity'] as const;
+export const CAPABILITIES = ['live', 'chat', 'activity', 'events'] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -76,6 +78,24 @@ export interface ChatProvider {
 export interface ActivityProvider {
 	readonly descriptor: ProviderDescriptor;
 	activity(limit: number): Promise<Activity>;
+}
+
+/**
+ * A push connection, for the services that have one.
+ *
+ * The separate capability is the point: `chat` is "give me the last forty messages" and `events` is
+ * "tell me when one arrives". A provider can have either without the other — Owncast can be polled
+ * and pushes nothing; a webhook-only donation service pushes and cannot be asked for a backlog —
+ * and the page works with any combination, because a deployment with no event provider polls the
+ * endpoints exactly as it did before this existed.
+ *
+ * `start` is handed a sink rather than returning a stream so the provider does not have to care how
+ * many browsers are attached, or whether any are. It returns the function that closes the
+ * connection, which is the only thing the caller can usefully do with it.
+ */
+export interface EventProvider {
+	readonly descriptor: ProviderDescriptor;
+	start(publish: (event: SiteEvent) => void): Promise<() => void>;
 }
 
 /**

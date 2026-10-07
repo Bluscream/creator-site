@@ -21,11 +21,17 @@
 import { ServiceFailure, notConfigured } from '#lib/server/failure.js';
 import { credentialsFor } from '#lib/server/providers/credentials.js';
 import type { Credential } from '#lib/server/providers/credentials.js';
-import { synchraActivity, synchraChat, synchraLive } from '#lib/server/providers/synchra.js';
+import {
+	synchraActivity,
+	synchraChat,
+	synchraEvents,
+	synchraLive
+} from '#lib/server/providers/synchra.js';
 import type {
 	ActivityProvider,
 	Capability,
 	ChatProvider,
+	EventProvider,
 	LiveProvider,
 	ProviderDescriptor,
 	ProviderFactory
@@ -45,6 +51,9 @@ const CHAT_PROVIDERS: readonly ProviderFactory<ChatProvider>[] = [synchraChat];
 /** Providers that can report support events. */
 const ACTIVITY_PROVIDERS: readonly ProviderFactory<ActivityProvider>[] = [synchraActivity];
 
+/** Providers that can push events instead of being polled. */
+const EVENT_PROVIDERS: readonly ProviderFactory<EventProvider>[] = [synchraEvents];
+
 /**
  * One table per capability, so `providerStatuses()` can walk all of them.
  *
@@ -58,7 +67,8 @@ const TABLES: ReadonlyMap<Capability, readonly ProviderFactory<unknown>[]> = new
 >([
 	['live', LIVE_PROVIDERS],
 	['chat', CHAT_PROVIDERS],
-	['activity', ACTIVITY_PROVIDERS]
+	['activity', ACTIVITY_PROVIDERS],
+	['events', EVENT_PROVIDERS]
 ]);
 
 /** Built providers, so a client with connection state is not rebuilt per request. */
@@ -140,6 +150,11 @@ export function activityProvider(preferred?: string): ActivityProvider {
 	return resolve(ACTIVITY_PROVIDERS, 'activity', preferred);
 }
 
+/** The provider that pushes events. Throws `not_configured` when none can. */
+export function eventProvider(preferred?: string): EventProvider {
+	return resolve(EVENT_PROVIDERS, 'events', preferred);
+}
+
 /**
  * Whether a capability can be answered at all, for a page that wants to not render a panel.
  *
@@ -168,6 +183,17 @@ export function hasChatProvider(preferred?: string): boolean {
 
 export function hasActivityProvider(preferred?: string): boolean {
 	return has(activityProvider, preferred);
+}
+
+/**
+ * Whether anything can push events.
+ *
+ * False is an ordinary answer, not a degraded one: the page polls the endpoints, exactly as it did
+ * before the gateway existed. Which is why the SSE endpoint still accepts connections — a client
+ * should not have to branch on this.
+ */
+export function hasEventProvider(preferred?: string): boolean {
+	return has(eventProvider, preferred);
 }
 
 /** One provider's declared facts plus whether it is configured here. */

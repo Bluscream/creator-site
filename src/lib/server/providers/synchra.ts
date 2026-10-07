@@ -20,24 +20,33 @@
 import {
 	AuthenticationError,
 	AuthorizationError,
+	EventStream,
 	MessageContent,
 	NotFoundError,
 	Synchra,
 	SynchraError,
-	profileUrl
+	profileUrl,
+	staticToken
 } from 'synchra-ts';
-import type { Activity as SynchraActivity, ChatMessage as SynchraChatMessage } from 'synchra-ts';
+import type {
+	ChannelProviderStream,
+	Activity as SynchraActivity,
+	ChatMessage as SynchraChatMessage
+} from 'synchra-ts';
 import { NO_ACTIVITY } from '#lib/activity.js';
 import type { Activity, ActivityEntry } from '#lib/activity.js';
 import { NO_CHAT } from '#lib/chat.js';
 import type { Chat, ChatMessage } from '#lib/chat.js';
+import type { EventAction, SiteEvent } from '#lib/events.js';
 import { atom, offlinePlatform, watchUrl } from '#lib/live.js';
 import type { LiveStatus, PlatformState } from '#lib/live.js';
 import { ServiceFailure, notConfigured } from '#lib/server/failure.js';
+import { log } from '#lib/server/log.js';
 import type { Credential } from '#lib/server/providers/credentials.js';
 import type {
 	ActivityProvider,
 	ChatProvider,
+	EventProvider,
 	LiveProvider,
 	ProviderDescriptor,
 	ProviderFactory
@@ -364,6 +373,107 @@ export function describeActivity(activity: SynchraActivity): ActivityEntry {
 	};
 }
 
+/**
+ * The Synchra gateway as an event provider.
+ *
+ * One WebSocket, held by the server, fanned out to browsers over SSE. `synchra-ts` owns the socket:
+ * it reconnects with backoff, replays every subscription on the new connection, and keeps the
+ * connection alive with pings — so this file subscribes once and never thinks about the socket
+ * again. Reimplementing any of that would be the wheel this project does not rebuild.
+ *
+ * ### Why the mapping is the same three functions the endpoints use
+ *
+ * An event carries the same record the REST endpoint returns, so it maps through
+ * {@link describeMessage} and {@link describeActivity} and comes out identical to a row the client
+ * already knows how to draw. That is what lets a client fetch the backlog from `/api/chat` and then
+ * stream — one renderer, one set of field names.
+ */
+class SynchraEventProvider implements EventProvider {
+	readonly descriptor = descriptor;
+
+	readonly #stream: EventStream;
+	readonly #channelId: string;
+
+	constructor(credential: Credential) {
+		if (credential.channelId === undefined || credential.token === undefined) throw notConfigured();
+
+		this.#channelId = credential.channelId;
+		this.#stream = new EventStream(staticToken(credential.token), {
+			// The library's default is to log nothing and carry on. A gateway that silently stops
+			// delivering looks exactly like a quiet channel, which is the one failure that must not be
+			// invisible — the page would show stale chat forever and nothing would say so.
+			onError: (error, context) => {
+				log().warn(
+					{
+						context,
+						err: error instanceof Error ? { name: error.name, message: error.message } : undefined
+					},
+					'synchra gateway error'
+				);
+			}
+		});
+	}
+
+	async start(publish: (event: SiteEvent) => void): Promise<() => void> {
+		const data = { channel_id: this.#channelId };
+
+		this.#stream.on('chat_message', (event) => {
+			publish({ topic: 'chat', action: event.action, message: describeMessage(event.data) });
+		});
+
+		this.#stream.on('activity', (event) => {
+			publish({ topic: 'activity', action: event.action, entry: describeActivity(event.data) });
+		});
+
+		this.#stream.on('channel_provider_stream', (event) => {
+			publish({
+				topic: 'live',
+				action: event.action,
+				platform: event.data.provider,
+				state: streamState(event.data, event.action)
+			});
+		});
+
+		// Subscribed before connecting: subscriptions outlive the socket in `synchra-ts`, so this
+		// order means no window exists in which an event could arrive unsubscribed.
+		this.#stream
+			.subscribe('chat_message', data)
+			.subscribe('activity', data)
+			.subscribe('channel_provider_stream', data);
+
+		try {
+			await this.#stream.connect();
+		} catch (error) {
+			throw asFailure(error);
+		}
+
+		return () => {
+			this.#stream.close();
+		};
+	}
+}
+
+/**
+ * One platform's state, from a stream event.
+ *
+ * A `deleted` action means the stream record went away, which is how the gateway says "that
+ * broadcast is over" — so it maps to offline rather than to a stream with no viewers. Getting this
+ * backwards would leave the live badge lit until the next poll.
+ */
+function streamState(stream: ChannelProviderStream, action: EventAction): PlatformState {
+	if (action === 'deleted') return offlinePlatform(stream.provider, stream.provider_channel_id);
+
+	return {
+		live: true,
+		viewers: stream.viewer_count,
+		title: stream.title ?? null,
+		url: watchUrl(stream.provider, stream.provider_channel_id),
+		handle: stream.provider_channel_id,
+		started_at: atom(stream.started_at),
+		stream_id: stream.provider_stream_id ?? null
+	};
+}
+
 /** Chat needs only a channel, because reading it is anonymous. */
 export const synchraChat: ProviderFactory<ChatProvider> = {
 	descriptor,
@@ -371,13 +481,29 @@ export const synchraChat: ProviderFactory<ChatProvider> = {
 	create: (credential) => new SynchraChatProvider(credential)
 };
 
+/**
+ * Whether a credential carries both a channel and a token.
+ *
+ * Shared by the two capabilities that need both, so "configured" cannot come to mean one thing for
+ * activity and another for the gateway — they authenticate the same way and would then disagree
+ * about whether this deployment is set up.
+ */
+const hasTokenAndChannel = (credential: Credential): boolean =>
+	credential.channelId !== undefined &&
+	credential.channelId !== '' &&
+	credential.token !== undefined &&
+	credential.token !== '';
+
 /** Activity needs a token as well — an anonymous call answers 401. */
 export const synchraActivity: ProviderFactory<ActivityProvider> = {
 	descriptor,
-	usable: (credential) =>
-		credential.channelId !== undefined &&
-		credential.channelId !== '' &&
-		credential.token !== undefined &&
-		credential.token !== '',
+	usable: hasTokenAndChannel,
 	create: (credential) => new SynchraActivityProvider(credential)
+};
+
+/** The gateway authenticates with the same token the activity feed needs. */
+export const synchraEvents: ProviderFactory<EventProvider> = {
+	descriptor,
+	usable: hasTokenAndChannel,
+	create: (credential) => new SynchraEventProvider(credential)
 };

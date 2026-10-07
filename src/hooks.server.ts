@@ -1,5 +1,6 @@
-import type { Handle } from '@sveltejs/kit/hooks';
+import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
 import { sequence } from '@sveltejs/kit/hooks';
+import { startGateway } from '#lib/server/events.js';
 import {
 	baseLocale,
 	cookieName,
@@ -63,3 +64,17 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 	);
 
 export const handle: Handle = sequence(handleBrowserLanguage, handleParaglide);
+
+/**
+ * Opens the upstream event connection, once, when the server starts.
+ *
+ * `init` rather than lazily on the first SSE connection: the gateway is also how the server learns
+ * that a stream went live, and that has to work when nobody has the page open — otherwise the first
+ * visitor after a broadcast starts sees an offline badge until a poll catches up.
+ *
+ * It never throws. A deployment with no event provider, or an upstream that is down, is a site that
+ * polls — not a site that fails to boot.
+ */
+export const init: ServerInit = async () => {
+	await startGateway();
+};
