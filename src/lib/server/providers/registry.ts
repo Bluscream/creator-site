@@ -21,9 +21,11 @@
 import { ServiceFailure, notConfigured } from '#lib/server/failure.js';
 import { credentialsFor } from '#lib/server/providers/credentials.js';
 import type { Credential } from '#lib/server/providers/credentials.js';
-import { synchraLive } from '#lib/server/providers/synchra.js';
+import { synchraActivity, synchraChat, synchraLive } from '#lib/server/providers/synchra.js';
 import type {
+	ActivityProvider,
 	Capability,
+	ChatProvider,
 	LiveProvider,
 	ProviderDescriptor,
 	ProviderFactory
@@ -36,6 +38,28 @@ import type {
  * deployment that has it should not end up reading live status from somewhere else.
  */
 const LIVE_PROVIDERS: readonly ProviderFactory<LiveProvider>[] = [synchraLive];
+
+/** Providers that can read chat. */
+const CHAT_PROVIDERS: readonly ProviderFactory<ChatProvider>[] = [synchraChat];
+
+/** Providers that can report support events. */
+const ACTIVITY_PROVIDERS: readonly ProviderFactory<ActivityProvider>[] = [synchraActivity];
+
+/**
+ * One table per capability, so `providerStatuses()` can walk all of them.
+ *
+ * Typed against `ProviderFactory<unknown>` because what a factory builds is irrelevant to listing
+ * it: a `ProviderFactory<LiveProvider>` is assignable there, since `create`'s return type is
+ * covariant and nothing here calls it.
+ */
+const TABLES: ReadonlyMap<Capability, readonly ProviderFactory<unknown>[]> = new Map<
+	Capability,
+	readonly ProviderFactory<unknown>[]
+>([
+	['live', LIVE_PROVIDERS],
+	['chat', CHAT_PROVIDERS],
+	['activity', ACTIVITY_PROVIDERS]
+]);
 
 /** Built providers, so a client with connection state is not rebuilt per request. */
 const built = new Map<string, unknown>();
@@ -106,15 +130,44 @@ export function liveProvider(preferred?: string): LiveProvider {
 	return resolve(LIVE_PROVIDERS, 'live', preferred);
 }
 
-/** Whether anything can answer live status at all, for a page that wants to not render a panel. */
-export function hasLiveProvider(preferred?: string): boolean {
+/** The provider that reads chat. Throws `not_configured` when none can. */
+export function chatProvider(preferred?: string): ChatProvider {
+	return resolve(CHAT_PROVIDERS, 'chat', preferred);
+}
+
+/** The provider that reports support events. Throws `not_configured` when none can. */
+export function activityProvider(preferred?: string): ActivityProvider {
+	return resolve(ACTIVITY_PROVIDERS, 'activity', preferred);
+}
+
+/**
+ * Whether a capability can be answered at all, for a page that wants to not render a panel.
+ *
+ * One function taking a resolver rather than three copies of the same try/catch — and `has…` is
+ * built on the real resolver on purpose, so "is it configured" cannot drift from "does resolving it
+ * work", which is exactly the kind of disagreement that produces a panel that renders and then
+ * refuses.
+ */
+function has(resolver: (preferred?: string) => unknown, preferred?: string): boolean {
 	try {
-		liveProvider(preferred);
+		resolver(preferred);
 
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+export function hasLiveProvider(preferred?: string): boolean {
+	return has(liveProvider, preferred);
+}
+
+export function hasChatProvider(preferred?: string): boolean {
+	return has(chatProvider, preferred);
+}
+
+export function hasActivityProvider(preferred?: string): boolean {
+	return has(activityProvider, preferred);
 }
 
 /** One provider's declared facts plus whether it is configured here. */
@@ -132,11 +185,13 @@ export interface ProviderStatus {
  * absent row is not.
  */
 export function providerStatuses(): readonly ProviderStatus[] {
-	return LIVE_PROVIDERS.map((factory) => ({
-		descriptor: factory.descriptor,
-		capability: 'live' as const,
-		configured: factory.usable(credentialsFor(factory.descriptor.id))
-	}));
+	return [...TABLES].flatMap(([capability, factories]) =>
+		factories.map((factory) => ({
+			descriptor: factory.descriptor,
+			capability,
+			configured: factory.usable(credentialsFor(factory.descriptor.id))
+		}))
+	);
 }
 
 /** Drops the built providers. For tests, which must not inherit another case's client. */

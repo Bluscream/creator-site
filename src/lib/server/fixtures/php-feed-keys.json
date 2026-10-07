@@ -1,0 +1,60 @@
+{
+	"chat": {
+		"envelope": [
+			"ok",
+			"configured",
+			"available",
+			"reason",
+			"messages",
+			"age",
+			"stale",
+			"generated_at"
+		],
+		"message": [
+			"avatar",
+			"badges",
+			"colour",
+			"created_at",
+			"id",
+			"kind",
+			"notice",
+			"parts",
+			"profile",
+			"provider",
+			"text",
+			"viewer"
+		],
+		"segment": ["animated", "imageUrl", "kind", "text"],
+		"badge": ["imageUrl", "name", "type"]
+	},
+	"activity": {
+		"envelope": [
+			"ok",
+			"configured",
+			"available",
+			"reason",
+			"activities",
+			"age",
+			"stale",
+			"generated_at"
+		],
+		"entry": [
+			"amount",
+			"avatar",
+			"colour",
+			"count_name",
+			"created_at",
+			"currency",
+			"group",
+			"id",
+			"message",
+			"message_parts",
+			"provider",
+			"system_message",
+			"type",
+			"type_label",
+			"viewer"
+		],
+		"segment": ["animated", "imageUrl", "kind", "text"]
+	}
+}

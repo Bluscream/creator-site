@@ -27,6 +27,8 @@
  * else, cannot get any of that subtly wrong.
  */
 
+import type { Activity } from '#lib/activity.js';
+import type { Chat } from '#lib/chat.js';
 import type { LiveStatus } from '#lib/live.js';
 import type { Credential } from '#lib/server/providers/credentials.js';
 
@@ -51,6 +53,29 @@ export interface ProviderDescriptor {
 export interface LiveProvider {
 	readonly descriptor: ProviderDescriptor;
 	liveStatus(): Promise<LiveStatus>;
+}
+
+/**
+ * Recent chat, oldest first.
+ *
+ * `limit` is the caller's, not the provider's: how much chat a page wants is a product decision,
+ * and a provider that hard-coded it would make the overlay and the popup disagree. A provider that
+ * cannot honour the exact number returns what it can rather than failing.
+ *
+ * Returning a {@link Chat} with `available: false` rather than throwing is deliberate — being
+ * refused this one feed is a normal state for a deployment whose token was granted narrowly, and
+ * the rest of the page is unaffected. A provider still throws `ServiceFailure` for an actual
+ * failure, which is a different thing and is reported differently.
+ */
+export interface ChatProvider {
+	readonly descriptor: ProviderDescriptor;
+	chat(limit: number): Promise<Chat>;
+}
+
+/** Recent support events — donations, subs, gifts — newest first. */
+export interface ActivityProvider {
+	readonly descriptor: ProviderDescriptor;
+	activity(limit: number): Promise<Activity>;
 }
 
 /**
