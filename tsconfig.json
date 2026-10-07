@@ -24,6 +24,8 @@
 		"playwright.config.ts",
 		"drizzle.config.ts",
 		"eslint.config.js",
-		"prettier.config.js"
+		"prettier.config.js",
+		"commitlint.config.js",
+		"scripts"
 	]
 }

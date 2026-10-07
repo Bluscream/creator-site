@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+set -eu
+
+# Everything that must be true before a commit exists.
+#
+# This runs locally because it has to: Actions do not run on the account this repository lives on,
+# so the workflow is `workflow_dispatch` only and nothing checks a push automatically. There is no
+# server-side backstop — this hook is the gate.
+#
+# Ordered loudest-first: a leaked credential is the one mistake a later commit cannot undo, so it
+# is checked before anything else.
+#
+# `svelte-kit sync` runs first because it is a prerequisite, not a check: without the generated
+# `$app` types and route types, ESLint's type-aware rules see `any` everywhere and report a wall of
+# unsafe-assignment errors that have nothing to do with the staged change.
+
+npm run --silent sync
+
+printf '\n[1/4] secrets\n'
+node scripts/scan-secrets.js
+
+printf '\n[2/4] files that must never be committed\n'
+node scripts/check-staged-files.js
+
+printf '\n[3/4] format and lint, on staged files\n'
+npx --no-install lint-staged
+
+printf '\n[4/4] types\n'
+npm run --silent check
+
+printf '\nok\n'

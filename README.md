@@ -40,10 +40,15 @@ Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same m
 
 ## The gate
 
-`npm run gate` is format check → strict lint → `npm audit` → build → type check → tests, in that
-order, and it is what CI runs. One command rather than six, so CI cannot drift from what runs locally. The build
-comes before the type check because Paraglide's messages and SvelteKit's types do not exist in a
-fresh checkout and `svelte-check` flags every import of them.
+`npm run gate` is `svelte-kit sync` → format check → strict lint → `npm audit` → build → type check
+→ tests, in that order, and it is what CI runs. One command rather than seven, so CI cannot drift
+from what runs locally.
+
+The order is load-bearing in two places. `svelte-kit sync` is first because it is a prerequisite
+rather than a check: without the generated `$app` types, ESLint's type-aware rules see `any`
+everywhere and report a wall of unsafe-assignment errors unrelated to the actual code. The build
+comes before the type check because Paraglide's messages do not exist in a fresh checkout and
+`svelte-check` flags every import of them.
 
 **Strictness is the starting point, not something to migrate toward.**
 
@@ -76,6 +81,47 @@ There is exactly **one** in the project, and it should stay that way. `src/app.d
 `no-restricted-syntax` for a single line, because SvelteKit's ambient types are keyed on a global
 `App` **namespace** and there is no module form of that declaration. It names the rule, covers one
 line, and carries its reason above it. Any other suppression should be argued for in review.
+
+## Checks before a commit exists
+
+**The git hooks are the only automatic enforcement this repository has.** Actions do not run under
+the account it lives on (see [Continuous integration](#continuous-integration)), so nothing
+server-side inspects a push. Everything therefore happens locally, and the hooks are installed by
+`npm install` via husky's `prepare` script — there is no separate setup step to forget.
+
+`pre-commit`, ordered loudest-first:
+
+| Stage | What runs                       | Why it is first/at all                                                                                      |
+| ----- | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1     | `scripts/scan-secrets.js`       | A leaked credential is the one mistake a later commit cannot undo. Rewriting history does not unpublish it. |
+| 2     | `scripts/check-staged-files.js` | `.env` files, private keys, `.npmrc`, databases, and anything over 2 MB.                                    |
+| 3     | `lint-staged`                   | Prettier and `eslint --fix --max-warnings 0` on the staged files only, so committing stays fast.            |
+| 4     | `npm run check`                 | Types. The one slow step kept here, because a type error is cheap now and expensive later.                  |
+
+`commit-msg` runs commitlint against `@commitlint/config-conventional`. `pre-push` runs the full
+`npm run gate` — tests and `npm audit` included — because that is the last point before something
+leaves the machine.
+
+### The secret scan
+
+Two scanners, on purpose:
+
+- **secretlint** is an npm dependency, so it exists for anyone who ran `npm install`. It is the
+  floor and never optional.
+- **gitleaks** has a much broader rule set and reads the staged _diff_ rather than whole files. It
+  is a separate binary (`brew install gitleaks`), so it can be absent.
+
+When gitleaks is missing the scan prints `gitleaks: NOT INSTALLED` instead of staying quiet. A hook
+that prints nothing when a tool is not installed teaches you to read "no output" as "clean", which
+is the exact failure the hook exists to prevent.
+
+Both locks are tested rather than assumed. A staged file carrying a Slack token is refused by both
+scanners; a force-added `.env` holding nothing secret-shaped passes _both_ scanners and is refused
+by stage 2 — which is why stage 2 exists and why it checks the staged path list directly instead of
+trusting the `.gitignore` that was supposed to prevent it.
+
+Run the scan by hand with `npm run scan:secrets`. `--no-verify` is not a workflow: if a check is
+wrong, fix the check and say so in the commit.
 
 ## Toolchain notes
 

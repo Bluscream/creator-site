@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+# The full gate before anything leaves this machine.
+#
+# pre-commit runs the fast checks on staged files so committing stays quick; this runs everything,
+# including the tests and the dependency audit. It is the last thing between a mistake and a public
+# repository, because Actions do not run on this account.
+
+npm run gate

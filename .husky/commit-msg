@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Conventional Commits, checked rather than remembered.
+npx --no-install commitlint --edit "$1"
