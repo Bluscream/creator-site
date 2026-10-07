@@ -24,6 +24,7 @@
 
 import { blueskySourceProvider } from './bluesky-source.js';
 import { feedSourceProvider } from './feed-source.js';
+import { tiktokSourceProvider } from './tiktok-source.js';
 import { youtubeSourceProvider } from './youtube-source.js';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
 import type { PostSourceKind } from './posts-kinds.js';
@@ -33,7 +34,8 @@ import type { PostsSourceProvider } from './posts-source.js';
 const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = {
 	feed: feedSourceProvider,
 	youtube: youtubeSourceProvider,
-	bluesky: blueskySourceProvider
+	bluesky: blueskySourceProvider,
+	tiktok: tiktokSourceProvider
 };
 
 /**
@@ -44,11 +46,7 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
  */
 const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {
 	// Three requests on a cold cache: an app token, the broadcaster's numeric id, then the videos.
-	twitch: 'the official Helix API',
-
-	// One unauthenticated request to the page TikTok renders for embedding, which is server-rendered
-	// with the post list already in it.
-	tiktok: 'the TikTok embed page'
+	twitch: 'the official Helix API'
 };
 
 /** A kind that is configurable but has no reader yet. */

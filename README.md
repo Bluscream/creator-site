@@ -15,8 +15,8 @@ configured.
 > **Status: early.** In: the API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`,
 > `/api/posts`), the chat page, the configuration document layer, and the container.
 >
-> Not in: the admin, the links page, the calendar, and two of the five post source kinds — `twitch`
-> and `tiktok` are configurable but report that they have no reader yet. There
+> Not in: the admin, the links page, the calendar, and one of the five post source kinds — `twitch`
+> is configurable but reports that it has no reader yet. There
 > is no schema in the database and nothing writes to it. Nothing here is deployable as a finished
 > site.
 
@@ -153,8 +153,8 @@ registry maps a kind to the reader for it rather than choosing one
 | `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built** |
 | `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built** |
 | `bluesky` | the public AppView, unauthenticated                    | nothing         | **built** |
+| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | **built** |
 | `twitch`  | the official Helix API — videos and clips              | two credentials | planned   |
-| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | planned   |
 
 There is no single API for "this creator's posts everywhere", and the services that come closest are
 paid, per-seat and want OAuth against each platform — a monthly bill and a credential store for
@@ -167,6 +167,14 @@ feed-manufacturing bridge such as [RSS-Bridge](https://rss-bridge.org), run sepa
 a bridge speaks RSS it arrives as an ordinary `feed` source needing no kind of its own. Keeping the
 bridge out of this project is deliberate: its adapters break whenever a platform changes its markup,
 and at arm's length a broken bridge costs one empty tab rather than a release here.
+
+**TikTok is read rather than asked, and that is its weakness.** There is no public API for an
+account's videos — oEmbed describes one video you already have the url of, and the Display API needs
+the account holder to go through OAuth. So `tiktok` parses the state TikTok leaves in the HTML of its
+own embed page. It is the most fragile reader here: a layout change upstream breaks it, which is why
+it fails that one source with a message naming both possible causes rather than failing the feed. It
+also derives each date from the id, because the payload carries no timestamp at all — and that is
+what re-sorts the pinned videos TikTok lists first and does not mark.
 
 **A kind with no reader yet still answers.** It reports a reason naming what will read it, which
 appears in that source's entry in `/api/posts`. A missing registry entry would instead make a

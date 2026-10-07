@@ -28,7 +28,7 @@
 
 import { z } from 'zod';
 import type { Post } from '../../posts.js';
-import { buildPost, plain } from './post.js';
+import { buildPost, headline } from './post.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
 import type { PostsSourceProvider, SourceContext } from './posts-source.js';
@@ -37,9 +37,6 @@ const API = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed';
 
 /** How many to ask for. The AppView's own ceiling is 100; a feed row shows far fewer. */
 const LIMIT = 25;
-
-/** How long a stand-in title may be before it is cut. */
-const TITLE_LENGTH = 90;
 
 /**
  * A handle is a domain name.
@@ -136,24 +133,6 @@ function shallowImageOf(embed: unknown): string | null {
 	);
 }
 
-/** The first line, standing in for a title. */
-export function firstLine(text: string): string {
-	const line = plain(text.split('\n')[0] ?? '') ?? '';
-
-	if (line === '') return '';
-
-	// Counted in grapheme clusters for the reason `post.ts` explains: a post is mostly emoji, and
-	// cutting by code unit or code point breaks them in different ways.
-	const units = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(line)];
-
-	return units.length > TITLE_LENGTH
-		? `${units
-				.slice(0, TITLE_LENGTH)
-				.map((unit) => unit.segment)
-				.join('')}…`
-		: line;
-}
-
 /** The handle `target` names, lower-cased, or null. */
 export function handleOf(target: string): string | null {
 	let value = target.trim();
@@ -231,7 +210,7 @@ function toPost(post: FeedPost | undefined, source: ResolvedSource): Post | null
 	return buildPost(source, {
 		id: cid ?? rkey,
 		url: `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(rkey)}`,
-		title: firstLine(text),
+		title: headline(text),
 		excerpt: text,
 		image: imageOf(embed),
 		publishedAt: record?.createdAt,

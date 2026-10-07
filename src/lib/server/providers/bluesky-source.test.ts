@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { blueskySourceProvider, firstLine, handleOf } from './bluesky-source.js';
+import { blueskySourceProvider, handleOf } from './bluesky-source.js';
 import { memoryStore } from '#lib/server/fixtures/source-context.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -236,24 +236,6 @@ describe('the picture on a post', () => {
 		);
 
 		expect(post?.image).toBeNull();
-	});
-});
-
-describe('a stand-in title', () => {
-	it('is the first line only', () => {
-		expect(firstLine('One\nTwo\nThree')).toBe('One');
-	});
-
-	it('is empty for empty text', () => {
-		expect(firstLine('')).toBe('');
-		expect(firstLine('\n\n')).toBe('');
-	});
-
-	it('is cut when the first line is a paragraph', () => {
-		const cut = firstLine('word '.repeat(60));
-
-		expect(cut.endsWith('…')).toBe(true);
-		expect(cut.length).toBeLessThan(120);
 	});
 });
 

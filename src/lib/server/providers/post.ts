@@ -25,6 +25,9 @@ const EXCERPT_LENGTH = 220;
  */
 const BOUNDARY_REACH = 40;
 
+/** How long a stand-in title may be before it is cut. See {@link headline}. */
+const HEADLINE_LENGTH = 90;
+
 /**
  * One configured place to read posts from, resolved.
  *
@@ -178,6 +181,29 @@ export function excerpt(value: string | null | undefined): string {
 	const keep = space > EXCERPT_LENGTH - BOUNDARY_REACH ? head.slice(0, space) : head;
 
 	return `${keep.join('').trimEnd()}…`;
+}
+
+/**
+ * A stand-in title, for a platform whose posts do not have one.
+ *
+ * Bluesky and TikTok both hand over a single run of text and nothing that is a title. The first
+ * line of it stands in, and the full text is still the excerpt — otherwise every row would be
+ * headed by its own body.
+ *
+ * Cut much shorter than an excerpt, because this lands in a heading: a two-line heading above a
+ * four-line excerpt reads as the same sentence twice. Cut in grapheme clusters for the reason
+ * {@link characters} explains.
+ */
+export function headline(value: string | null | undefined): string {
+	const line = plain((value ?? '').split('\n')[0] ?? '');
+
+	if (line === null || line === '') return '';
+
+	const units = characters(line);
+
+	return units.length > HEADLINE_LENGTH
+		? `${units.slice(0, HEADLINE_LENGTH).join('').trimEnd()}…`
+		: line;
 }
 
 /**

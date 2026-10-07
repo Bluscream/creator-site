@@ -31,7 +31,15 @@ export interface Post {
 	/** A key of the platform registry, or null for a source that is not a known platform. */
 	readonly platform: string | null;
 
-	/** Never null: a post with no title renders with its excerpt, and an absent title is `''`. */
+	/**
+	 * Never null: a post with no title renders with its excerpt, and an absent title is `''`.
+	 *
+	 * May equal the whole `excerpt`. Bluesky and TikTok have no title field, so the first line of the
+	 * text stands in — and for a short post the first line *is* the text. Measured against a live
+	 * TikTok account, where a description of nothing but hashtags came back identical in both. A row
+	 * drawing both must therefore skip the excerpt when it repeats the title rather than printing it
+	 * twice; that is the renderer's decision, which is why nothing is blanked here.
+	 */
 	readonly title: string;
 
 	/** Where the post is. Always `http`-prefixed — a post with no link is not a post. */

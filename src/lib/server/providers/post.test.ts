@@ -7,7 +7,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildPost, excerpt, image, plain, resolveSource, sourceCacheKey, when } from './post.js';
+import {
+	buildPost,
+	excerpt,
+	headline,
+	image,
+	plain,
+	resolveSource,
+	sourceCacheKey,
+	when
+} from './post.js';
 import type { ResolvedSource } from './post.js';
 
 const source: ResolvedSource = {
@@ -208,6 +217,52 @@ describe('an excerpt', () => {
 		// on a joiner, and none was cut down to a lone person.
 		expect(cut).not.toMatch(/‍…$/u);
 		expect(cut.replaceAll(family, '').replace('…', '')).toBe('');
+	});
+});
+
+describe('a stand-in title', () => {
+	it('is the first line only, because a heading is one line', () => {
+		expect(headline('One\nTwo\nThree')).toBe('One');
+	});
+
+	it('is empty for nothing, rather than a word a translation could not reach', () => {
+		expect(headline('')).toBe('');
+		expect(headline('\n\n')).toBe('');
+		expect(headline(null)).toBe('');
+		expect(headline(undefined)).toBe('');
+	});
+
+	it('is the whole line when the line is short', () => {
+		expect(headline('A post about otters')).toBe('A post about otters');
+	});
+
+	it('is cut when the first line is a paragraph', () => {
+		const cut = headline('word '.repeat(60));
+
+		expect(cut.endsWith('…')).toBe(true);
+
+		// Counted the same way the cut counts: 89 words' worth of clusters kept, the trailing space
+		// trimmed, then the ellipsis.
+		const clusters = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(cut)];
+
+		expect(clusters).toHaveLength(90);
+	});
+
+	it('does not cut an emoji in half', () => {
+		// The prefix is load-bearing: a whole string of otters is an even number of UTF-16 units, so
+		// a cut by code unit would land on a boundary by luck and a broken implementation would pass.
+		const cut = headline(`x${'🦦'.repeat(200)}`);
+
+		expect(cut).not.toMatch(/[\uD800-\uDFFF]…$/u);
+	});
+
+	it('does not cut a family into its members', () => {
+		// Counting code points rather than clusters splits this into a man, a woman and a girl —
+		// which renders as different content rather than as damage, so it is the worse failure.
+		const family = '👨‍👩‍👧';
+		const cut = headline(`x${family.repeat(100)}`);
+
+		expect(cut.replace('x', '').replaceAll(family, '').replace('…', '')).toBe('');
 	});
 });
 

@@ -7,9 +7,8 @@
  *
  * Every configured source is reported with how its last read went, including the ones that worked.
  * Listing only the failures would make a source that silently stopped being read indistinguishable
- * from one that was never configured — and it is what lets this ship while four of the five source
- * kinds have no reader yet: an unimplemented source says so in its own `reason` rather than going
- * quietly missing.
+ * from one that was never configured — and it is what lets this ship while a source kind still has
+ * no reader: an unimplemented source says so in its own `reason` rather than going quietly missing.
  *
  * A source can be `ok: false` with a non-zero `count`. That is not a contradiction: its last read
  * failed and it is still serving what it returned before. See `posts.ts` for why that is the point.
