@@ -1,18 +1,18 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-
+	"chat_empty": "Noch keine Nachrichten — der Chat erscheint hier, sobald der Stream live ist.",
+	"chat_log_label": "Live-Chat",
+	"chat_page_title": "Live-Chat",
+	"chat_unavailable": "Der Chat ist gerade nicht verfügbar.",
 	"common_cancel": "Abbrechen",
 	"common_loading": "Wird geladen…",
 	"common_retry": "Erneut versuchen",
 	"common_save": "Speichern",
 	"common_updated_ago": "Vor {age} aktualisiert",
-
 	"error_not_found_body": "Diese Seite existiert nicht oder wurde verschoben.",
 	"error_not_found_title": "Nicht gefunden",
 	"error_unexpected_body": "Bei uns ist etwas schiefgelaufen. Ein neuer Versuch genügt vielleicht schon.",
 	"error_unexpected_title": "Etwas ist schiefgelaufen",
-
 	"locale_switch_label": "Sprache",
-
 	"nav_home": "Start"
 }

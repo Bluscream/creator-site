@@ -42,7 +42,7 @@
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
 		"sync": "svelte-kit sync",
-		"gate": "npm run sync && npm run format:check && npm run lint:code && npm audit --audit-level=moderate && npm run build && npm run check && npm run test:unit -- --run",
+		"gate": "npm run sync && npm run format:check && npm run lint:code && npm audit --audit-level=moderate && npm run build && npm run check && npm run test",
 		"format:check": "prettier --check .",
 		"lint:code": "eslint .",
 		"scan:secrets": "node scripts/scan-secrets.js"

@@ -30,10 +30,10 @@ const LIGHT_SURFACE = '#ffffff';
  * 4.5:1 is the bar for body text. The PHP original aimed at a luminance of 0.35 as a stand-in for
  * this; stating the ratio means the intent survives.
  */
-const GLYPH_CONTRAST = 3;
+export const GLYPH_CONTRAST = 3;
 
 /** Text on a filled surface is text, so it gets the text bar rather than the glyph one. */
-const TEXT_CONTRAST = 4.5;
+export const TEXT_CONTRAST = 4.5;
 
 const toOklch = converter('oklch');
 
@@ -64,17 +64,22 @@ export function readableInk(fill: string): string {
  * A colour that already clears the ratio is returned untouched, so Twitch's purple and Discord's
  * blurple are unaffected. The step count is bounded because a loop with no bound in a render path
  * is a loop that one day hangs a page over a rounding error.
+ *
+ * @param target The ratio to reach. {@link GLYPH_CONTRAST} by default, which is the bar for a mark
+ *               or a border. Pass {@link TEXT_CONTRAST} for something that is read as *text* — a
+ *               viewer's name in their own chat colour is the case this exists for, and 3:1 is not
+ *               enough for a word somebody has to read.
  */
-export function onLight(hex: string): string {
+export function onLight(hex: string, target: number = GLYPH_CONTRAST): string {
 	const base = toOklch(hex);
 
 	if (base === undefined) return DARK_INK;
-	if (wcagContrast(hex, LIGHT_SURFACE) >= GLYPH_CONTRAST) return formatHex(base);
+	if (wcagContrast(hex, LIGHT_SURFACE) >= target) return formatHex(base);
 
 	for (let step = 1; step <= 50; step += 1) {
 		const candidate = formatHex({ ...base, l: Math.max(0, base.l - step * 0.02) });
 
-		if (wcagContrast(candidate, LIGHT_SURFACE) >= GLYPH_CONTRAST) return candidate;
+		if (wcagContrast(candidate, LIGHT_SURFACE) >= target) return candidate;
 	}
 
 	// Pure black clears 21:1, so this is unreachable in practice; returning the darkest thing we

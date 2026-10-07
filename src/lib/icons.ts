@@ -59,6 +59,54 @@ export type IconElement = readonly [
 	attrs: Readonly<Record<string, string | number | undefined>>
 ];
 
+/**
+ * The SVG primitives `Icon.svelte` knows how to draw.
+ *
+ * Svelte needs an element's tag at compile time, so the component lists these out rather than
+ * building one from a string — which means a lucide glyph using a primitive that is *not* here
+ * renders as nothing at all, silently, and looks like a missing icon rather than a bug. The list
+ * therefore lives beside the registry, and a test asserts that nothing in the registry falls
+ * outside it.
+ *
+ * Adding one here means adding a branch to the component as well; the test says so when it fails.
+ */
+export const DRAWABLE_TAGS = [
+	'path',
+	'circle',
+	'line',
+	'rect',
+	'polyline',
+	'polygon',
+	'ellipse'
+] as const;
+
+export type DrawableTag = (typeof DRAWABLE_TAGS)[number];
+
+/** Whether `Icon.svelte` has a branch for this tag. */
+export function isDrawableTag(tag: string): tag is DrawableTag {
+	return (DRAWABLE_TAGS as readonly string[]).includes(tag);
+}
+
+/**
+ * Every tag in the registry that the component could not draw.
+ *
+ * Empty is the only acceptable answer, and a test says so. Returned as a list rather than a boolean
+ * so the failure names the tag to add.
+ */
+export function undrawableTags(): readonly string[] {
+	const found = new Set<string>();
+
+	for (const drawing of Object.values(ICONS)) {
+		if (drawing.kind !== 'stroke') continue;
+
+		for (const [tag] of drawing.elements) {
+			if (!isDrawableTag(tag)) found.add(tag);
+		}
+	}
+
+	return [...found].sort();
+}
+
 /** An outline glyph: drawn with `fill="none" stroke="currentColor"`, on a 24 grid. */
 export interface StrokeIcon {
 	readonly kind: 'stroke';

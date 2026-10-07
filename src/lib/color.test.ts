@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+	GLYPH_CONTRAST,
+	TEXT_CONTRAST,
 	contrast,
 	isHexColor,
 	isReadableText,
@@ -84,6 +86,39 @@ describe('darkening a colour for a light background', () => {
 	it('terminates on the hardest input instead of running to the bound', () => {
 		// White is the worst case: if the loop could fail to converge, it would be here.
 		expect(onLight('#ffffff')).not.toBe('#0b0e14');
+	});
+
+	/**
+	 * The text bar, for a colour that is read as a word rather than seen as a mark.
+	 *
+	 * A viewer's chat colour is the case this was added for: they picked it against a platform's
+	 * dark chat, and on a light page their name still has to be legible. 3:1 is the threshold for
+	 * an icon; a name is text.
+	 */
+	it.each([
+		['#ffffff'],
+		['#ff0000'],
+		['#53fc19'],
+		['#00f2fe'],
+		['#feda75'],
+		['#9146ff'],
+		['#74b816']
+	])('%s reaches the text bar when asked for it', (hex) => {
+		expect(contrast(onLight(hex, TEXT_CONTRAST), '#ffffff')).toBeGreaterThanOrEqual(TEXT_CONTRAST);
+	});
+
+	it('darkens further for text than for a mark', () => {
+		// Otherwise the parameter is decoration: a colour sitting between the two bars has to come
+		// back different depending on which was asked for. Kick's green is exactly such a colour.
+		const asMark = onLight('#53fc19', GLYPH_CONTRAST);
+		const asText = onLight('#53fc19', TEXT_CONTRAST);
+
+		expect(asText).not.toBe(asMark);
+		expect(contrast(asText, '#ffffff')).toBeGreaterThan(contrast(asMark, '#ffffff'));
+	});
+
+	it('defaults to the mark bar, so every existing caller is unchanged', () => {
+		expect(onLight('#53fc19')).toBe(onLight('#53fc19', GLYPH_CONTRAST));
 	});
 });
 

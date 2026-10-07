@@ -12,8 +12,9 @@ A self-hosted website for content creators. One application, one container, one 
 Every feature is optional and off until it is turned on. The install should be usable before it is
 configured.
 
-> **Status: early.** The scaffold and the first ported modules are in. Nothing here is deployable
-> yet.
+> **Status: early.** The API surface (`/api/live`, `/api/chat`, `/api/activity`, `/api/events`) and
+> the chat page are in. The admin, the database, the links page and the feed are not. Nothing here
+> is deployable yet.
 
 ## Running it
 
@@ -41,14 +42,21 @@ Node **26** or newer (`.nvmrc` pins it; the deployment container runs the same m
 ## The gate
 
 `npm run gate` is `svelte-kit sync` → format check → strict lint → `npm audit` → build → type check
-→ tests, in that order, and it is what CI runs. One command rather than seven, so CI cannot drift
-from what runs locally.
+→ unit tests → browser tests, in that order. One command rather than eight, so nothing can claim to
+be "what CI runs" while differing from what runs locally. About 40 seconds.
 
 The order is load-bearing in two places. `svelte-kit sync` is first because it is a prerequisite
 rather than a check: without the generated `$app` types, ESLint's type-aware rules see `any`
 everywhere and report a wall of unsafe-assignment errors unrelated to the actual code. The build
 comes before the type check because Paraglide's messages do not exist in a fresh checkout and
 `svelte-check` flags every import of them.
+
+**The browser tests are in the gate, not beside it.** Three defects in the chat page were invisible
+to every unit test and to the type checker — a dark background with no text colour, a `Canvas`
+background with no `color-scheme`, and a notice label printed twice — because all three are
+questions about what a browser computes. They were found by screenshotting the page. A suite that
+can answer those questions is only useful if it runs by default, so `test:e2e` installs its own
+browser (a fast no-op once cached) and runs with everything else.
 
 **Strictness is the starting point, not something to migrate toward.**
 
@@ -307,11 +315,15 @@ choice:
 ## Layout
 
 ```
-src/lib/server/    server-only code — SvelteKit's bundler refuses to ship it to the browser
-src/lib/           shared between server and client
-src/routes/        pages and API routes
-messages/          translation catalogues, one file per locale (en, de)
+src/lib/server/              server-only code — the bundler refuses to ship it to the browser
+src/lib/server/providers/    one directory per capability seam; add a provider by adding a factory
+src/lib/components/          Svelte components
+src/lib/                     shared between server and client — domain types live here
+src/routes/                  pages and API routes
+messages/                    translation catalogues, one file per locale (en, de)
 ```
+
+Tests sit beside what they test: `*.test.ts` for Vitest, `*.e2e.ts` for Playwright.
 
 `src/lib/server/` is load-bearing rather than a convention: anything touching the filesystem, a
 lock or a credential goes there, so an accidental client import is a build error rather than a leak.
