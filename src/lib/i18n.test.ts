@@ -72,7 +72,12 @@ const NAMESPACES = new Set([
  */
 const INTENTIONALLY_IDENTICAL = new Set<string>([
 	// The product's own name. Translating it would name a different product.
-	'de:home_title'
+	'de:home_title',
+
+	// Both are the German words too. "Administrator" and "Moderator" are the terms German uses for
+	// these roles, and inventing a different one would be less clear rather than more translated.
+	'de:admin_role_admin',
+	'de:admin_role_moderator'
 ]);
 
 const settingsSchema = z.object({

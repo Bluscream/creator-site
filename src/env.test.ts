@@ -21,6 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parseAdminAccounts, parseAllowRegistration } from './env.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -109,5 +110,75 @@ describe('.env.example', () => {
 		const live = Array.from(read('.env.example').matchAll(/^([A-Z][A-Z0-9_]*)=/gm), (m) => m[1]);
 
 		expect(live).toEqual(['DATABASE_URL']);
+	});
+});
+
+/**
+ * The two parsers in `env.ts` that are more than a `z.string()`.
+ *
+ * Imported as functions rather than exercised through `defineEnvVars`, for the reason given at the
+ * top: what that returns at runtime is SvelteKit's business. These two are this project's own logic,
+ * they decide who can administer the site, and every way they could go wrong is silent.
+ */
+describe('parseAdminAccounts', () => {
+	it('is empty when nothing is set', () => {
+		expect(parseAdminAccounts(undefined)).toStrictEqual([]);
+	});
+
+	it('is empty for an empty value', () => {
+		// Which is what commenting the line out badly leaves behind.
+		expect(parseAdminAccounts('')).toStrictEqual([]);
+	});
+
+	it('reads one entry', () => {
+		expect(parseAdminAccounts('discord:1234567890')).toStrictEqual(['discord:1234567890']);
+	});
+
+	it('reads several, ignoring the spaces people leave after commas', () => {
+		expect(parseAdminAccounts('discord:1234567890, google:98765')).toStrictEqual([
+			'discord:1234567890',
+			'google:98765'
+		]);
+	});
+
+	it('lower-cases the entry so a comparison cannot miss on capitalisation', () => {
+		expect(parseAdminAccounts('Discord:ABCdef')).toStrictEqual(['discord:abcdef']);
+	});
+
+	it.each([
+		['a bare id with no provider', '1234567890'],
+		['a provider with no id', 'discord:'],
+		['an id with no provider', ':123'],
+		['an email, which is not an id', 'someone@example.com'],
+		['a username', 'discord:some one'],
+		['a provider starting with a digit', '1discord:123'],
+		['something with a comma inside it', 'discord:1;google:2 2']
+	])('drops %s', (_, entry) => {
+		// Dropped rather than kept: an entry nobody can match is a setting that quietly does nothing,
+		// which is better than one that matches something unintended.
+		expect(parseAdminAccounts(entry)).toStrictEqual([]);
+	});
+
+	it('keeps the good entries from a list with a bad one in it', () => {
+		expect(parseAdminAccounts('discord:1234567890,nonsense')).toStrictEqual(['discord:1234567890']);
+	});
+});
+
+describe('parseAllowRegistration', () => {
+	it.each(['true', '1'])('is on for %s', (raw) => {
+		expect(parseAllowRegistration(raw)).toBe(true);
+	});
+
+	it.each([
+		['nothing set', undefined],
+		['an empty value', ''],
+		['yes', 'yes'],
+		['on', 'on'],
+		['TRUE, because a boolean should not be case-insensitive guesswork', 'TRUE'],
+		['false', 'false'],
+		['0', '0']
+	])('is off for %s', (_, raw) => {
+		// The safe reading of an unclear setting is the one that does not open registration.
+		expect(parseAllowRegistration(raw)).toBe(false);
 	});
 });

@@ -1,6 +1,7 @@
 import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
 import { sequence } from '@sveltejs/kit/hooks';
 import { startGateway } from '#lib/server/events.js';
+import { SESSION_COOKIE, resolve as resolveSession } from '#lib/server/session.js';
 import {
 	baseLocale,
 	cookieName,
@@ -63,7 +64,38 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 		)
 	);
 
-export const handle: Handle = sequence(handleBrowserLanguage, handleParaglide);
+/**
+ * Resolves who is signed in, once, for every request.
+ *
+ * Here rather than in each `load` for two reasons. A page that asks for the session itself is a page
+ * that can forget to ask, and forgetting is the failure that matters; and the sliding renewal in
+ * `session.resolve` should happen once per request rather than once per load function that happened
+ * to look.
+ *
+ * The cookie is refreshed when the session renewed, so a browser that keeps visiting keeps a cookie
+ * whose own expiry matches the row's. Without this the row would slide and the cookie would still
+ * expire thirty days after it was issued, signing out somebody whose session was perfectly alive.
+ */
+const handleSession: Handle = ({ event, resolve }) => {
+	const token = event.cookies.get(SESSION_COOKIE);
+	const session = token === undefined ? null : resolveSession(token);
+
+	event.locals.principal = session?.principal ?? null;
+
+	if (session !== null && token !== undefined) {
+		event.cookies.set(SESSION_COOKIE, token, {
+			path: '/',
+			httpOnly: true,
+			sameSite: 'lax',
+			secure: true,
+			expires: new Date(session.expiresAt * 1000)
+		});
+	}
+
+	return resolve(event);
+};
+
+export const handle: Handle = sequence(handleSession, handleBrowserLanguage, handleParaglide);
 
 /**
  * Opens the upstream event connection, once, when the server starts.

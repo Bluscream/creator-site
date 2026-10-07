@@ -11,7 +11,8 @@
  */
 
 import {
-	ADMIN_DISCORD_IDS,
+	ADMIN_ACCOUNTS,
+	ALLOW_REGISTRATION,
 	DISCORD_CLIENT_ID,
 	DISCORD_CLIENT_SECRET,
 	SYNCHRA_CHANNEL_ID,
@@ -50,22 +51,37 @@ export function hasDiscordAuth(): boolean {
 /**
  * Whether anyone can actually get into the admin.
  *
- * Sign-in being configured is not the same as somebody being allowed through it. An empty
- * allow-list with working credentials is the state where every sign-in succeeds and every
- * authorisation fails, which looks like a bug and is really a missing setting.
+ * Sign-in being configured is enough: the first account on an install with none becomes the owner,
+ * so a creator with working credentials and an empty `ADMIN_ACCOUNTS` can still claim their own
+ * site. That is a deliberate difference from the PHP original, which had no accounts and so had to
+ * treat an empty allow-list as "nobody".
+ *
+ * {@link hasNamedAdmins} is the question that list answers, and the two are reported separately
+ * because they mean different things to the person setting the site up.
  */
 export function hasAdmin(): boolean {
-	return hasDiscordAuth() && ADMIN_DISCORD_IDS.length > 0;
+	return hasDiscordAuth();
+}
+
+/**
+ * Whether anybody is named in `ADMIN_ACCOUNTS`.
+ *
+ * Not a gate — it is what lets the setup page say "nobody is named as an administrator, so whoever
+ * signs in first owns this site". An install reachable from the internet should have this set before
+ * it is announced.
+ */
+export function hasNamedAdmins(): boolean {
+	return ADMIN_ACCOUNTS.length > 0;
+}
+
+/** Whether a visitor nobody has seen before may create an account. */
+export function allowsRegistration(): boolean {
+	return ALLOW_REGISTRATION;
 }
 
 /** Whether the Twitch VOD and clip feed can run. As Discord above: both halves or neither. */
 export function hasTwitchApi(): boolean {
 	return TWITCH_CLIENT_ID !== undefined && TWITCH_CLIENT_SECRET !== undefined;
-}
-
-/** Whether a Discord id is allowed into the admin. */
-export function isAdmin(discordId: string): boolean {
-	return ADMIN_DISCORD_IDS.includes(discordId);
 }
 
 /**
@@ -80,6 +96,8 @@ export function integrationStatus(): Readonly<Record<string, boolean>> {
 		synchraToken: hasSynchraToken(),
 		discordAuth: hasDiscordAuth(),
 		admin: hasAdmin(),
+		namedAdmins: hasNamedAdmins(),
+		registration: allowsRegistration(),
 		twitchApi: hasTwitchApi()
 	};
 }

@@ -114,11 +114,17 @@ export function findByIdentity(provider: string, providerUserId: string): Princi
 /**
  * Signs somebody in, creating the account if the policy allows it.
  *
- * @param policy `register` decides what happens to an identity nobody has seen before.
+ * @param policy  `register` decides what happens to an identity nobody has seen before.
+ * @param options `floor` is the lowest role this identity is entitled to, from
+ *                `auth/policy.ts` — the environment naming who administers this install. Applied to
+ *                a new account and to a returning one, raising only: somebody named as an admin who
+ *                is already the owner stays the owner. This is the escape hatch that makes the role
+ *                system safe to use, because a creator who demoted themselves can still get back in.
  */
 export function signIn(
 	identity: ProviderIdentity,
-	policy: { readonly register: boolean }
+	policy: { readonly register: boolean },
+	options?: { readonly floor?: Role | null }
 ): SignInResult {
 	if (identity.provider === '' || identity.providerUserId === '') {
 		// Not a validation nicety: an empty provider id would make one `identities` row match every
@@ -126,10 +132,11 @@ export function signIn(
 		return { ok: false, reason: 'invalid_identity' };
 	}
 
+	const floor = options?.floor ?? null;
 	const existing = findByIdentity(identity.provider, identity.providerUserId);
 
 	if (existing !== null)
-		return { ok: true, principal: refreshed(existing, identity), created: false };
+		return { ok: true, principal: raised(refreshed(existing, identity), floor), created: false };
 
 	// The first account to exist owns the installation; see the note at the top. Checked before the
 	// registration policy, because a fresh install has to be claimable even with registration off —
@@ -138,7 +145,31 @@ export function signIn(
 
 	if (!first && !policy.register) return { ok: false, reason: 'registration_closed' };
 
-	return { ok: true, principal: create(identity, first ? 'owner' : DEFAULT_ROLE), created: true };
+	const role = first ? 'owner' : (floor ?? DEFAULT_ROLE);
+
+	return { ok: true, principal: create(identity, role), created: true };
+}
+
+/**
+ * Raises a principal to at least `floor`, writing the new role if it changed.
+ *
+ * Raising only. {@link ROLES} is widest first, so "at least" is a lower index — and an owner named
+ * as an admin in the environment keeps the wider role rather than being quietly demoted to match a
+ * setting that was only ever meant to let them in.
+ */
+function raised(principal: Principal, floor: Role | null): Principal {
+	if (floor === null) return principal;
+
+	const held = ROLES.indexOf(principal.role);
+	const least = ROLES.indexOf(floor);
+
+	if (held <= least) return principal;
+
+	db().update(users).set({ role: floor }).where(eq(users.id, principal.userId)).run();
+
+	log().info({ from: principal.role, to: floor }, 'role raised to the configured floor');
+
+	return { ...principal, role: floor };
 }
 
 /**

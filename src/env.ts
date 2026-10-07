@@ -25,8 +25,45 @@
 import { defineEnvVars } from '@sveltejs/kit/env';
 import { z } from 'zod';
 
-/** A Discord snowflake: 17–20 digits. */
-const snowflake = /^\d{17,20}$/;
+/**
+ * One `ADMIN_ACCOUNTS` entry: a provider kind, a colon, and the provider's own id for somebody.
+ *
+ * The id half is deliberately loose about its shape — a Discord snowflake is digits, a Google
+ * subject is digits, a GitHub id is digits, but nothing says the next provider's is. What is
+ * enforced is that there is a provider, there is an id, and neither contains anything that would
+ * make one entry match another.
+ */
+const adminAccount = /^[a-z][a-z0-9_-]{1,31}:[A-Za-z0-9_.-]{1,128}$/;
+
+/**
+ * `ADMIN_ACCOUNTS` as a list, from the comma-separated string an operator sets.
+ *
+ * Exported and pure so it can be tested directly. It decides who can always get into the admin, and
+ * every way it could go wrong is silent: an entry matched case-sensitively, or kept despite being
+ * malformed, reads to the person who set it as "the environment says I am an admin and the site
+ * disagrees".
+ *
+ * Lower-cased on both sides of the comparison, because a provider kind is lower case by convention
+ * and an operator who typed `Discord:123` meant the same thing. Anything that is not `provider:id`
+ * is dropped rather than kept as a value some comparison might accidentally match.
+ */
+export function parseAdminAccounts(raw: string | undefined): readonly string[] {
+	return (raw ?? '')
+		.split(',')
+		.map((entry) => entry.trim().toLowerCase())
+		.filter((entry) => adminAccount.test(entry));
+}
+
+/**
+ * `ALLOW_REGISTRATION`, as a boolean.
+ *
+ * Only `true` and `1` turn it on. Anything else — including `yes`, `on` and an empty value left
+ * behind by commenting out the line badly — leaves it off, because the safe reading of an unclear
+ * setting is the one that does not open registration.
+ */
+export function parseAllowRegistration(raw: string | undefined): boolean {
+	return raw === 'true' || raw === '1';
+}
 
 export const variables = defineEnvVars({
 	DATABASE_URL: {
@@ -98,25 +135,41 @@ export const variables = defineEnvVars({
 		schema: z.url().optional()
 	},
 
+	// --- Who administers this installation -----------------------------------------------------
+
 	/**
-	 * Discord user ids allowed into the admin.
+	 * The accounts that administer this installation, as `provider:id` pairs.
 	 *
-	 * Ids rather than names: a Discord username can be changed by its owner and reused by somebody
-	 * else, while a snowflake is permanent. Anything that is not a snowflake is dropped rather than
-	 * kept as an entry some string comparison might accidentally match — and an empty list means
-	 * nobody gets in, which is the right failure for a missing setting.
+	 * `discord:123456789012345678,google:11822…` — the provider's own id, never a username, because a
+	 * username can be changed by its owner and then registered by somebody else. Not Discord-specific:
+	 * this product is not bound to one vendor, and the sign-in providers are a seam.
+	 *
+	 * An account named here is an `admin` as soon as it exists, and is raised back to `admin` if it
+	 * ended up lower — the escape hatch that makes the rest of the role system safe to use, because a
+	 * creator can always get back into their own site. It does not *lower* anybody: an owner named
+	 * here stays the owner.
+	 *
+	 * **Set this before exposing a fresh install to the internet.** The first account to sign in to an
+	 * unclaimed install becomes the owner; this is what makes that survivable.
+	 *
+	 * An entry that is not `provider:id` is dropped rather than kept as something a comparison might
+	 * accidentally match, and an empty list means nobody is named.
 	 */
-	ADMIN_DISCORD_IDS: {
-		description: 'Comma-separated Discord user ids allowed into the admin. Empty means nobody.',
-		schema: z
-			.string()
-			.optional()
-			.transform((raw) =>
-				(raw ?? '')
-					.split(',')
-					.map((id) => id.trim())
-					.filter((id) => snowflake.test(id))
-			)
+	ADMIN_ACCOUNTS: {
+		description: 'Comma-separated `provider:id` accounts that administer this install.',
+		schema: z.string().optional().transform(parseAdminAccounts)
+	},
+
+	/**
+	 * Whether somebody nobody has seen before may create an account.
+	 *
+	 * Off by default. Turning it on hands the creator a moderation queue, deletion requests and abuse
+	 * reports, and that should be a decision rather than something that happened. Signing in to an
+	 * account that already exists is unaffected, and so is claiming an install that has none.
+	 */
+	ALLOW_REGISTRATION: {
+		description: 'Set to `true` to let new visitors create accounts. Off by default.',
+		schema: z.string().optional().transform(parseAllowRegistration)
 	},
 
 	// --- Twitch, for the post feed -------------------------------------------------------------

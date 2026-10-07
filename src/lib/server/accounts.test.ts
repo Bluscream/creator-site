@@ -388,3 +388,98 @@ describe('the schema the tests run against', () => {
 		expect(present).toStrictEqual(drizzleTables());
 	});
 });
+
+/**
+ * The role floor: the environment naming who must be able to administer this install.
+ *
+ * It only ever raises. An owner named as an admin in the environment keeps the wider role, because
+ * the setting exists to let somebody *in*, not to cap what they hold — and a setting that quietly
+ * demoted the owner of a site would be very hard to diagnose from the outside.
+ */
+describe('the role floor', () => {
+	it('gives a new account the floor instead of the default', () => {
+		signedIn(DISCORD);
+
+		const second = signIn(
+			{ provider: 'discord', providerUserId: '2' },
+			{ register: true },
+			{
+				floor: 'admin'
+			}
+		);
+
+		expect(second).toMatchObject({ ok: true, principal: { role: 'admin' } });
+	});
+
+	it('still makes the first account the owner, not the floor', () => {
+		const first = signIn(DISCORD, { register: true }, { floor: 'admin' });
+
+		expect(first).toMatchObject({ ok: true, principal: { role: 'owner' } });
+	});
+
+	it('raises a returning account that ended up lower', () => {
+		// The escape hatch: a creator who demoted themselves can still get back into their own site.
+		signedIn(DISCORD);
+		const second = signedIn({ provider: 'discord', providerUserId: '2' });
+
+		expect(second.principal.role).toBe(DEFAULT_ROLE);
+
+		const again = signIn(
+			{ provider: 'discord', providerUserId: '2' },
+			{ register: false },
+			{
+				floor: 'admin'
+			}
+		);
+
+		expect(again).toMatchObject({ ok: true, principal: { role: 'admin' } });
+	});
+
+	it('persists the raise rather than only reporting it', () => {
+		signedIn(DISCORD);
+		signedIn({ provider: 'discord', providerUserId: '2' });
+
+		signIn({ provider: 'discord', providerUserId: '2' }, { register: false }, { floor: 'admin' });
+
+		expect(findByIdentity('discord', '2')?.role).toBe('admin');
+	});
+
+	it('never lowers anybody', () => {
+		const owner = signedIn(DISCORD);
+
+		const again = signIn(DISCORD, { register: false }, { floor: 'admin' });
+
+		expect(again).toMatchObject({ ok: true, principal: { role: 'owner' } });
+		expect(findByIdentity('discord', '1')?.role).toBe(owner.principal.role);
+	});
+
+	it('writes nothing when the role already satisfies the floor', () => {
+		signedIn(DISCORD);
+
+		signIn(DISCORD, { register: false }, { floor: 'admin' });
+
+		expect(findByIdentity('discord', '1')?.role).toBe('owner');
+	});
+
+	it('does nothing at all without one', () => {
+		signedIn(DISCORD);
+		const second = signedIn({ provider: 'discord', providerUserId: '2' });
+
+		expect(second.principal.role).toBe(DEFAULT_ROLE);
+	});
+
+	it('does not raise somebody the policy refused', () => {
+		// The floor says what a role must be, not who may have an account.
+		signedIn(DISCORD);
+
+		const refused = signIn(
+			{ provider: 'discord', providerUserId: '3' },
+			{ register: false },
+			{
+				floor: 'admin'
+			}
+		);
+
+		expect(refused).toStrictEqual({ ok: false, reason: 'registration_closed' });
+	});
+});

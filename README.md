@@ -20,12 +20,12 @@ configured.
 > the live API — it needs credentials this repository does not have — so treat it as written and
 > tested rather than proven.
 >
-> Accounts and sessions are in the database, with migrations that apply themselves on startup. The
-> sign-in flow itself — the OAuth round trip that produces an identity — is not written yet, so
-> nothing creates an account through the web interface.
+> Signing in works, end to end: accounts and revocable sessions in the database, migrations that
+> apply themselves on startup, Discord as the first sign-in provider behind a seam, and an admin
+> shell behind a role guard.
 >
-> Not in: the admin, the links page, and the calendar. Nothing here is deployable as a finished
-> site.
+> Not in: the pages the admin shell will hold — links, feed sources, the calendar — and the public
+> links page. Nothing here is deployable as a finished site.
 
 ## Running it
 
@@ -373,6 +373,69 @@ if that ever stops being true, this is one of the places that has to change.
 compares every column, type, null-ness, default and index against the test fixture's own DDL — which
 is how a forgotten `npm run db:generate` fails the gate instead of failing an upgrade.
 
+## Signing in: a seam, one flow, one guard
+
+Four files under `src/lib/server/auth/`, and the split between them is the design.
+
+**A provider knows two things and nothing else**: where to send somebody, and how to turn the code
+that comes back into an identity (`sign-in-provider.ts`). Discord is the one implemented
+(`discord-sign-in.ts`), and it is implemented _behind the interface_ for the same reason the chat
+and post providers are — this is a product other people install, and a creator who does not use
+Discord should not be unable to run their own site. Adding Google is adding a file and an array
+entry.
+
+**The flow is written once, for every provider** (`flow.ts`). The parts that are easy to get subtly
+wrong should not exist once per vendor: the constant-time `state` comparison, the allow-list on
+where a visitor may be sent afterwards, the cookie flags, and clearing a pending flow whether or not
+it succeeded. `arctic` supplies the provider plumbing — about 200 lines of hand-rolled authorize-URL
+building and token exchange deleted from the PHP original, per provider.
+
+**The guard is a layout, not a page check** (`guard.ts` and `src/routes/admin/+layout.server.ts`). A
+per-page check is a check a new page can be written without, so the default under `/admin` is
+"protected" and a page opts out by not living there. `src/routes/admin/page.svelte.e2e.ts` asserts
+that over HTTP, because the unit tests cannot tell whether the guard is _wired to the route_.
+
+Decisions worth stating:
+
+- **`identify` and nothing else.** Not `guilds`, not `email`. The site needs to know who signed in
+  and nothing more. The access token is used exactly once, to read the account, and then dropped —
+  never stored, so there is no refresh flow and nothing to leak later.
+- **No failure message carries the provider's own words.** The token exchange request contains the
+  client secret and a rejected request can be echoed back in the response, so a message built from
+  an error body is a credential on a visitor's screen. There are tests that assert exactly that.
+- **The pending flow is a cookie, not a row.** A server-side one would need sweeping, would not
+  survive a restart mid-flow, and would make a sign-in _attempt_ a database write available to
+  anyone who can reach the login route. Ten minutes, `HttpOnly`, `Secure`.
+- **`SameSite=Lax`, not `Strict`.** The callback arrives as a top-level navigation from the
+  provider, and `Strict` withholds the cookie on exactly that request — so the visitor would land
+  signed out and try forever. `Lax` still withholds it from cross-site `POST`s.
+- **Signing out is a `POST`.** On a `GET` it can be fired by an `<img>` on another site, a link
+  preview or a prefetcher, and the creator is signed out repeatedly with no way to tell why. The
+  session _row_ is deleted, not just the cookie.
+- **What the `state` check does not protect.** It stops a third party who can make the victim's
+  browser issue the callback, because they cannot read or set that cookie. It does not stop somebody
+  who can already write cookies for this site — who can do worse things than force a sign-in. The
+  destination is allow-listed regardless of where it came from, so even a planted cookie can only
+  send the visitor to a path on this site.
+
+### Who administers an install
+
+`ADMIN_ACCOUNTS` names them, as `provider:id` pairs — the provider's own id, never a username, which
+its owner can change and somebody else can then register. An account it names is an `admin` as soon
+as it exists and is _raised_ back to `admin` if it ended up lower. It never demotes anybody: an owner
+named there stays the owner.
+
+That is the escape hatch which makes the rest of the role system safe to use, and it narrows the one
+uncomfortable property of the account store. The first account on an unclaimed install becomes its
+owner — which is how first-run setup works without a password printed in a log — and with
+`ADMIN_ACCOUNTS` set, a stranger who got there first would own an install whose real administrator
+can still sign in and demote them. With it unset, nothing stops them. **Set it before putting a fresh
+install on the internet**; the sign-in page says so out loud while it is unset, because hiding it
+would not make it less true.
+
+`ALLOW_REGISTRATION` is off by default. Signing in to an account that already exists is unaffected,
+and so is claiming an empty install.
+
 ### The pragmas are not optional
 
 SQLite defaults foreign keys **off**, per connection. Without `PRAGMA foreign_keys = ON` the
@@ -577,6 +640,7 @@ choice:
 ```
 src/lib/server/              server-only code — the bundler refuses to ship it to the browser
 src/lib/server/providers/    the capability seams; add a provider by adding a factory
+src/lib/server/auth/         the sign-in seam, the OAuth flow, the role guard
 src/lib/server/db/           the SQLite connection, the Drizzle schema and the migrator
 drizzle/                     generated migrations — committed, and applied on startup
 src/lib/components/          Svelte components

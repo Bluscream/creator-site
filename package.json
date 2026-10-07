@@ -61,6 +61,7 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"dependencies": {
+		"arctic": "^3.7.0",
 		"better-sqlite3": "^13.0.2",
 		"better-sse": "^0.16.1",
 		"culori": "^4.0.2",
