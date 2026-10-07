@@ -25,11 +25,11 @@
  */
 
 import { mkdirSync, statSync, truncateSync } from 'node:fs';
-import { join } from 'node:path';
 import pino from 'pino';
 import readLastLines from 'read-last-lines';
 import { createStream } from 'rotating-file-stream';
 import { z } from 'zod';
+import { dataDir, dataPath } from './paths.js';
 
 /** Rotated at a megabyte, keeping one previous file. Enough to read back a bad afternoon. */
 const MAX_SIZE = '1M';
@@ -40,16 +40,12 @@ const FILENAME = 'creator-site.log';
 /**
  * Where the log goes.
  *
- * Read from the environment directly rather than through `config.ts` — see the class note above.
- * Defaults beside the database rather than anywhere web-reachable; SvelteKit serves no directory,
- * but a log that could be fetched would be a log of someone else's requests.
+ * `paths.ts` reads the environment directly rather than going through `config.ts`, for the reason
+ * in the note above — and defaults beside the database rather than anywhere web-reachable, since a
+ * log that could be fetched would be a log of someone else's requests.
  */
-function directory(): string {
-	return process.env.DATA_DIR ?? 'data';
-}
-
 export function logPath(): string {
-	return join(directory(), FILENAME);
+	return dataPath(FILENAME);
 }
 
 /**
@@ -92,11 +88,11 @@ export function log(): pino.Logger {
 	const streams: pino.StreamEntry[] = [{ stream: process.stderr }];
 
 	try {
-		mkdirSync(directory(), { recursive: true });
+		mkdirSync(dataDir(), { recursive: true });
 
 		streams.push({
 			stream: createStream(FILENAME, {
-				path: directory(),
+				path: dataDir(),
 				size: MAX_SIZE,
 				maxFiles: KEEP_FILES,
 				// Compressing a log an admin page reads back would mean decompressing it to read it.

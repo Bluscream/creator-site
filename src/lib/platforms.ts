@@ -228,14 +228,21 @@ export function detectPlatform(url: string): Platform | null {
 	return null;
 }
 
-/** One link as configuration records it, before anything is resolved. */
+/**
+ * One link as configuration records it, before anything is resolved.
+ *
+ * Every field is `| undefined` as well as optional, which `exactOptionalPropertyTypes` otherwise
+ * treats as different things. It matters because these entries come from a parsed configuration
+ * document, where an absent field is present-and-undefined rather than missing — so without it,
+ * every caller would have to build an entry by conditionally assigning each key.
+ */
 export interface LinkEntry {
-	readonly id?: string;
-	readonly url?: string;
-	readonly name?: string;
-	readonly icon?: string;
-	readonly color?: string;
-	readonly platform?: string;
+	readonly id?: string | undefined;
+	readonly url?: string | undefined;
+	readonly name?: string | undefined;
+	readonly icon?: string | undefined;
+	readonly color?: string | undefined;
+	readonly platform?: string | undefined;
 }
 
 /**
