@@ -28,3 +28,6 @@ src/lib/paraglide
 project.inlang/cache/
 # SQLite
 *.db
+
+# Working notes and design documents kept beside the code but not published
+.references/
