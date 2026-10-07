@@ -4,15 +4,14 @@
 	"chat_log_label": "Live chat",
 	"chat_page_title": "Live chat",
 	"chat_unavailable": "Chat is unavailable right now.",
-	"common_cancel": "Cancel",
 	"common_loading": "Loading…",
-	"common_retry": "Try again",
-	"common_save": "Save",
-	"common_updated_ago": "Updated {age} ago",
 	"error_not_found_body": "That page does not exist, or it has moved.",
 	"error_not_found_title": "Not found",
 	"error_unexpected_body": "Something went wrong at our end. Trying again may be enough.",
 	"error_unexpected_title": "Something went wrong",
+	"home_lead": "A self-hosted site for content creators. This install is not configured yet.",
+	"home_title": "creator-site",
 	"locale_switch_label": "Language",
+	"nav_chat": "Live chat",
 	"nav_home": "Home"
 }

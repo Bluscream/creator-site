@@ -56,6 +56,7 @@ const NAMESPACES = new Set([
 	'contact',
 	'error',
 	'feed',
+	'home',
 	'links',
 	'locale',
 	'nav',
@@ -69,7 +70,10 @@ const NAMESPACES = new Set([
  * it, the identical ones are a stated fact with a reviewer behind them rather than an oversight.
  * Nothing is here yet; entries are `['de', 'common_ok']`-shaped when they arrive.
  */
-const INTENTIONALLY_IDENTICAL = new Set<string>([]);
+const INTENTIONALLY_IDENTICAL = new Set<string>([
+	// The product's own name. Translating it would name a different product.
+	'de:home_title'
+]);
 
 const settingsSchema = z.object({
 	baseLocale: z.string(),

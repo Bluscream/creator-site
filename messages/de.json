@@ -4,15 +4,14 @@
 	"chat_log_label": "Live-Chat",
 	"chat_page_title": "Live-Chat",
 	"chat_unavailable": "Der Chat ist gerade nicht verfügbar.",
-	"common_cancel": "Abbrechen",
 	"common_loading": "Wird geladen…",
-	"common_retry": "Erneut versuchen",
-	"common_save": "Speichern",
-	"common_updated_ago": "Vor {age} aktualisiert",
 	"error_not_found_body": "Diese Seite existiert nicht oder wurde verschoben.",
 	"error_not_found_title": "Nicht gefunden",
 	"error_unexpected_body": "Bei uns ist etwas schiefgelaufen. Ein neuer Versuch genügt vielleicht schon.",
 	"error_unexpected_title": "Etwas ist schiefgelaufen",
+	"home_lead": "Eine selbst gehostete Website für Content-Creator. Diese Installation ist noch nicht eingerichtet.",
+	"home_title": "creator-site",
 	"locale_switch_label": "Sprache",
+	"nav_chat": "Live-Chat",
 	"nav_home": "Start"
 }

@@ -254,13 +254,25 @@ of its own; a client that wants a localized response asks for one.
 placeholder lost or invented in translation, an empty value, a misnamed key, an unknown namespace, an
 unsorted file. Each one was verified by planting the defect and watching it fail.
 
-Two gaps are **known and still open**, both to be closed when the first UI lands:
+Both of the gaps that were open here are **now closed**, in `src/lib/i18n-coverage.ts`, once there
+was a UI for them to look at:
 
-- **A hardcoded string that never went through `m.*` at all.** This is the exact failure that shipped
-  in the PHP admin — headings and placeholders rendered English in a German page with nothing
-  reporting it — and no check here would see it. It needs a scanner over markup literals.
-- **Dead keys.** Nothing yet reports a catalogue entry no code refers to. Left out on purpose while
-  the catalogue is ahead of the UI, since every key would currently be reported.
+- **A hardcoded string that never went through `m.*` at all** — the exact failure that shipped in the
+  PHP admin, where headings and placeholders rendered English in a German page and nothing reported
+  it. A catalogue check cannot see it: a string that was never a key cannot be a missing
+  translation. Every `.svelte` file is parsed with **`svelte/compiler`** and its markup walked for
+  visible text. The parser matters — a regex has to decide whether `<!-- Save -->` is a comment,
+  whether `class="Save me"` is an attribute, and whether `'Save'` in the `<script>` block is markup,
+  and gets at least one wrong. It found four strings in the SvelteKit scaffold's front page, which
+  is now a real translated page.
+- **Dead keys**, and the reverse: a key referenced in code that the catalogue lacks. Paraglide
+  resolves a missing key to _its own name_, so a typo renders `chat_emtpy` on the page rather than
+  failing. Ten dead keys were found; six described UI that should exist and now does — an error
+  page, a language switcher, a front page — and four belonged to an admin that does not, so they
+  were removed and will come back with it.
+
+Each check was verified by planting the defect it exists to catch, including the checker's own
+blind spots: that it does not report a comment, an attribute, CSS content or a script literal.
 
 ## Checks before a commit exists
 
