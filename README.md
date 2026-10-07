@@ -82,6 +82,37 @@ There is exactly **one** in the project, and it should stay that way. `src/app.d
 `App` **namespace** and there is no module form of that declaration. It names the rule, covers one
 line, and carries its reason above it. Any other suppression should be argued for in review.
 
+## Libraries over reimplementation
+
+**If a maintained library does the whole job, it does the job.** Four modules ported from the PHP
+site were largely reimplementations of things that already exist, and the port deleted far more than
+it translated:
+
+| was                                                                           | is now                                              | what went away                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Icons.php` — ~200 lines of pasted SVG path data                              | `lucide` + `simple-icons`                           | **every path**. Brand marks come from the upstream they were copied from; a brand refresh is `npm update`. Kick, Rumble and Bluesky gained real marks instead of a generic ring.                                |
+| `Platform.php` — hand-written WCAG luminance, a darken-by-0.85 loop           | `culori` ([`src/lib/color.ts`](src/lib/color.ts))   | the maths, and a latent bug: scaling sRGB channels drifts the hue, and the loop aimed at a luminance threshold as a _proxy_ for a contrast ratio. The ratio is now the condition, and lightness moves in OKLCH. |
+| `Config.php` — `.env` parsing, `getenv` fallback, readability checks          | `defineEnvVars` + zod ([`src/env.ts`](src/env.ts))  | all of the parsing. A variable is now declared: validated at startup, typed where used, documented on hover.                                                                                                    |
+| `Log.php` — tab-separated format, size rotation, backwards block-walking tail | `pino` + `rotating-file-stream` + `read-last-lines` | the format, the rotation and the tail reader — and "never log a token" stopped being a rule to remember (see below).                                                                                            |
+
+Two choices inside that worth knowing:
+
+- **`rotating-file-stream` over `pino-roll`.** pino transports run in a worker thread resolved by
+  name at runtime, which is the thing that breaks once a bundler is involved. An ordinary Writable
+  has no such failure mode.
+- **`svg()` did not port, deliberately.** It built an element as a string because PHP has no
+  component model. The registry is data; a component renders it. That also deleted `forBrowser()`,
+  which existed to serialise the registry into `window.PLATFORMS` — the chat imports the module now
+  and the bundler tree-shakes it.
+
+### Secrets never reach the log
+
+pino's `redact` censors a configured list of field names before anything is serialised, so a token
+passed by accident in a context object cannot reach either destination. This is the one case where
+a library replaced a _rule someone had to remember_ with a mechanism, so it is tested directly:
+`src/lib/server/log.test.ts` asserts that seven credential-shaped field names, and one nested one
+level down, come out as `[redacted]` — and removing a single entry from the list fails the suite.
+
 ## Languages
 
 English and German, with more addable in one place. Every user-facing string goes through Paraglide
