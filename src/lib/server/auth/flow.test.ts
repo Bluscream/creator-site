@@ -38,12 +38,29 @@ vi.mock('../log.js', () => ({
 	})
 }));
 
-/** The environment the flow reads. Mocked so a developer's own `.env` cannot change a result. */
-const env = vi.hoisted(() => ({ redirect: undefined as string | undefined }));
+/**
+ * The environment the flow reads, as a typed record rather than an inferred one.
+ *
+ * Declared with explicit `| undefined` because `exactOptionalPropertyTypes` makes "absent" and
+ * "present and undefined" different values, and a test that unsets `SECRET_KEY` is doing the second.
+ * The type cannot be inferred from the initialiser — and an `as` on the initialiser is what the lint
+ * rule calls unnecessary and removes.
+ */
+const env = vi.hoisted(() => {
+	const state: { redirect: string | undefined; secret: string | undefined } = {
+		redirect: undefined,
+		secret: 'a-test-passphrase'
+	};
+
+	return state;
+});
 
 vi.mock('$app/env/private', () => ({
 	get DISCORD_REDIRECT_URI() {
 		return env.redirect;
+	},
+	get SECRET_KEY() {
+		return env.secret;
 	},
 	ADMIN_ACCOUNTS: [] as string[],
 	ALLOW_REGISTRATION: true
@@ -62,6 +79,8 @@ const {
 const { SignInFailure } = await import('./sign-in-provider.js');
 const { SESSION_COOKIE, resolve } = await import('../session.js');
 const { findByIdentity, identitiesOf, signIn } = await import('../accounts.js');
+const { connectionsOf, credentialFor } = await import('../connections.js');
+const { forgetKey } = await import('../secrets.js');
 
 let database: OpenMemoryDb;
 
@@ -69,6 +88,10 @@ beforeEach(() => {
 	database = memoryDb();
 	open.current = { db: database.db };
 	env.redirect = undefined;
+	env.secret = 'a-test-passphrase';
+	// The derived key is cached, and a test that changes the passphrase would otherwise be decrypting
+	// with the previous test's key.
+	forgetKey();
 });
 
 afterEach(() => {
@@ -703,5 +726,186 @@ describe('the link intent', () => {
 		);
 
 		expect(completed.intent).toBe('sign-in');
+	});
+});
+
+/**
+ * The `connect` intent, which writes a credential rather than a way of signing in.
+ *
+ * Shares a round trip with `link` and nothing else. The checks it repeats — the flow finishing
+ * against the account that started it, a platform account somebody else already holds — are repeated
+ * on purpose: they guard two different tables with two different blast radii, and a test that
+ * covered only one would not notice the other losing its guard.
+ */
+describe('the connect intent', () => {
+	/** A provider that hands back a credential worth keeping. */
+	function granting(overrides: Partial<SignInProvider> = {}): SignInProvider {
+		return stubProvider({
+			grant: () =>
+				Promise.resolve({
+					identity: { provider: 'stub', providerUserId: '1', name: 'Someone' },
+					accessToken: 'an-access-token',
+					refreshToken: 'a-refresh-token',
+					expiresAt: 2_000_000_000,
+					scopes: ['read']
+				}),
+			...overrides
+		});
+	}
+
+	/** Signs somebody in, then runs a connect flow for them. */
+	async function connectTrip(
+		provider: SignInProvider,
+		options: {
+			readonly startedBy?: string;
+			readonly as?: Awaited<ReturnType<typeof roundTrip>>;
+		} = {}
+	) {
+		const existing = options.as ?? (await roundTrip());
+		const signedIn = existing.completed.principal;
+		const { cookies } = jar();
+		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+			intent: 'connect',
+			userId: options.startedBy ?? signedIn.userId
+		});
+		const state = url.searchParams.get('state') ?? '';
+
+		const completed = await completeSignIn(
+			provider,
+			requestFor(`/auth/stub/callback?code=abc&state=${state}`, cookies),
+			signedIn
+		);
+
+		return { completed, signedIn };
+	}
+
+	it('writes a linked account for whoever is signed in', async () => {
+		const { completed, signedIn } = await connectTrip(granting());
+
+		expect(completed.intent).toBe('connect');
+
+		const [connection] = connectionsOf(signedIn.userId);
+
+		expect(connection?.platform).toBe('stub');
+		expect(connection?.platformAccountId).toBe('1');
+		expect(connection?.method).toBe('oauth');
+		expect(connection?.scopes).toEqual(['read']);
+	});
+
+	it('keeps the credential where it can be read back', async () => {
+		await connectTrip(granting());
+
+		expect(credentialFor('stub')?.accessToken).toBe('an-access-token');
+		expect(credentialFor('stub')?.refreshToken).toBe('a-refresh-token');
+	});
+
+	it('never puts the token on the page-safe shape', async () => {
+		// `Connection` is what an account page renders. It is a different type from `Credential`
+		// precisely so a token cannot reach a template by being on the object that got there.
+		const { signedIn } = await connectTrip(granting());
+		const [connection] = connectionsOf(signedIn.userId);
+
+		expect(JSON.stringify(connection)).not.toContain('an-access-token');
+	});
+
+	it('issues no second session, because the person is already signed in', async () => {
+		const existing = await roundTrip();
+		const before = existing.values.get(SESSION_COOKIE);
+
+		await connectTrip(granting(), { as: existing });
+
+		expect(existing.values.get(SESSION_COOKIE)).toBe(before);
+	});
+
+	it('links a provider with nothing worth keeping, and stores no token at all', async () => {
+		// Discord's case: `identify` and nothing else, so the token unlocks what the identity already
+		// said. The row is a handle and an avatar, which is all the socials capability wants.
+		const { signedIn } = await connectTrip(stubProvider());
+		const [connection] = connectionsOf(signedIn.userId);
+
+		expect(connection?.platform).toBe('stub');
+		expect(connection?.scopes).toEqual([]);
+		expect(credentialFor('stub')?.accessToken).toBeNull();
+	});
+
+	it('exchanges the authorization code exactly once', async () => {
+		// A code is single-use. Asking for the identity and then for the grant would have the
+		// provider reject the second call, which is the kind of thing that only shows up in
+		// production because a stub happily answers twice.
+		const identify = vi.fn(() =>
+			Promise.resolve<ProviderIdentity>({ provider: 'stub', providerUserId: '1' })
+		);
+		const grant = vi.fn(() =>
+			Promise.resolve({
+				identity: { provider: 'stub', providerUserId: '1' },
+				accessToken: 'a',
+				refreshToken: null,
+				expiresAt: null,
+				scopes: []
+			})
+		);
+
+		await connectTrip(stubProvider({ identify, grant }));
+
+		expect(grant).toHaveBeenCalledTimes(1);
+		expect(identify).not.toHaveBeenCalled();
+	});
+
+	it('refuses a flow started by a different account', async () => {
+		await expect(connectTrip(granting(), { startedBy: 'somebody-else' })).rejects.toBeInstanceOf(
+			SignInFailure
+		);
+	});
+
+	it('refuses when nobody is signed in', async () => {
+		const { cookies } = jar();
+		const provider = granting();
+		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+			intent: 'connect',
+			userId: 'someone'
+		});
+		const state = url.searchParams.get('state') ?? '';
+
+		await expect(
+			completeSignIn(provider, requestFor(`/auth/stub/callback?code=a&state=${state}`, cookies))
+		).rejects.toBeInstanceOf(SignInFailure);
+	});
+
+	it('refuses a platform account somebody else has already linked', async () => {
+		await connectTrip(granting());
+
+		// A second person, linking the same platform account. Refusing rather than reassigning: moving
+		// a credential between accounts is how one person takes over another's feed.
+		const other = signIn({ provider: 'stub', providerUserId: 'other' }, { register: true });
+
+		expect(other.ok).toBe(true);
+
+		const { cookies } = jar();
+		const provider = granting();
+
+		if (!other.ok) throw new Error('could not create the second account');
+
+		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+			intent: 'connect',
+			userId: other.principal.userId
+		});
+		const state = url.searchParams.get('state') ?? '';
+
+		await expect(
+			completeSignIn(
+				provider,
+				requestFor(`/auth/stub/callback?code=a&state=${state}`, cookies),
+				other.principal
+			)
+		).rejects.toThrow(/already linked/);
+	});
+
+	it('refuses to write anything when no SECRET_KEY is set', async () => {
+		// A token that cannot be encrypted must not be written in the clear, and the message says it
+		// is the operator's configuration rather than the person's mistake.
+		env.secret = undefined;
+		forgetKey();
+
+		await expect(connectTrip(granting())).rejects.toThrow(/SECRET_KEY/);
 	});
 });

@@ -42,8 +42,10 @@ import type { Principal } from '../session.js';
 import { SESSION_COOKIE, SESSION_TTL, issue, revoke, sameToken } from '../session.js';
 import { log } from '../log.js';
 import { registrationPolicy, roleFloorFor } from './policy.js';
+import { link as linkConnection } from '../connections.js';
+import type { LinkRefusal } from '../connections.js';
 import { SignInFailure } from './sign-in-provider.js';
-import type { SignInProvider } from './sign-in-provider.js';
+import type { Grant, SignInProvider } from './sign-in-provider.js';
 import type { ProviderIdentity } from '../accounts.js';
 
 /**
@@ -92,8 +94,18 @@ const PLAIN_PATH = /^\/[\w\-./~%?&=:@+,;!$'()*#[\]]*$/u;
  * signed in, which is a different thing entirely: the identity that comes back must be attached to
  * the existing user rather than becoming one, and an identity somebody else already holds must be
  * refused rather than moved.
+ *
+ * `connect` is the third, and it is not the same as `link` even though the round trip is identical.
+ * A `link` writes an `identities` row — a bare pointer saying this person may sign in this way. A
+ * `connect` writes a `connections` row, which holds the credential and the granted scopes and is
+ * what the post, chat, live and socials capabilities read. Two tables because a row that can sign
+ * you in and a row that holds an API token have different blast radii; two intents for the same
+ * reason, so neither is ever written where the other was meant.
  */
-export type Intent = 'sign-in' | 'link';
+export type Intent = 'sign-in' | 'link' | 'connect';
+
+/** Every value {@link Intent} can take, for validating one that arrived in a query string. */
+export const INTENTS: readonly Intent[] = ['sign-in', 'link', 'connect'];
 
 /** What is remembered while the visitor is at the provider. */
 interface Pending {
@@ -173,7 +185,7 @@ export function beginSignIn(
 		verifier,
 		next: safePath(event.url.searchParams.get('next')),
 		intent,
-		userId: intent === 'link' ? (options.userId ?? null) : null
+		userId: intent === 'sign-in' ? null : (options.userId ?? null)
 	});
 
 	return url;
@@ -223,11 +235,17 @@ export async function completeSignIn(
 		throw new SignInFailure('That sign-in could not be verified. Please start again.');
 	}
 
-	const identity = await provider.identify(
-		code,
-		pending.verifier,
-		redirectUriFor(provider.kind, event.url)
-	);
+	const redirectUri = redirectUriFor(provider.kind, event.url);
+
+	// One exchange, whichever intent this is. An authorization code is single-use, so asking for the
+	// identity and then for the grant would have the provider reject the second call.
+	if (pending.intent === 'connect') {
+		const grant = await grantOf(provider, code, pending.verifier, redirectUri);
+
+		return { principal: connect(grant, pending, signedIn), next: pending.next, intent: 'connect' };
+	}
+
+	const identity = await provider.identify(code, pending.verifier, redirectUri);
 
 	if (pending.intent === 'link') {
 		return { principal: link(identity, pending, signedIn), next: pending.next, intent: 'link' };
@@ -280,6 +298,85 @@ function link(identity: ProviderIdentity, pending: Pending, signedIn: Principal 
 	}
 
 	return signedIn;
+}
+
+/**
+ * The credential to keep, or the identity alone for a provider with nothing worth keeping.
+ *
+ * A provider without `grant` is not an unfinished one: Discord asks for `identify` and nothing else,
+ * so its token unlocks exactly what the identity already said. The connection is then a handle, a
+ * display name and an avatar — which is all the socials capability wants — and no secret is written
+ * to disk at all.
+ */
+async function grantOf(
+	provider: SignInProvider,
+	code: string,
+	verifier: string | null,
+	redirectUri: string
+): Promise<Grant> {
+	if (provider.grant !== undefined) return provider.grant(code, verifier, redirectUri);
+
+	return {
+		identity: await provider.identify(code, verifier, redirectUri),
+		accessToken: null,
+		refreshToken: null,
+		expiresAt: null,
+		scopes: []
+	};
+}
+
+/**
+ * Writes the linked account the flow was started to create.
+ *
+ * The same two checks as {@link link}, because the ways this could go wrong are the same: a flow
+ * finishing against an account that is not the one that started it, and an account somebody else
+ * already holds. What differs is the refusal, because the reasons differ — `connections` refuses a
+ * platform account that another user has linked, and refuses everything when no `SECRET_KEY` is set,
+ * since a token that cannot be encrypted must not be written in the clear.
+ */
+function connect(grant: Grant, pending: Pending, signedIn: Principal | null): Principal {
+	if (signedIn === null) {
+		throw new SignInFailure('You have to be signed in to link an account.');
+	}
+
+	if (pending.userId !== signedIn.userId) {
+		throw new SignInFailure('That request was started by a different account. Please try again.');
+	}
+
+	const { identity } = grant;
+	const result = linkConnection({
+		userId: signedIn.userId,
+		platform: identity.provider,
+		platformAccountId: identity.providerUserId,
+		handle: identity.name ?? null,
+		displayName: identity.name ?? null,
+		avatarUrl: identity.avatarUrl ?? null,
+		method: 'oauth',
+		accessToken: grant.accessToken,
+		refreshToken: grant.refreshToken,
+		expiresAt: grant.expiresAt,
+		scopes: grant.scopes
+	});
+
+	if (typeof result === 'string') {
+		log().warn({ platform: identity.provider, reason: result }, 'link refused');
+
+		throw new SignInFailure(refusalMessage(result));
+	}
+
+	return signedIn;
+}
+
+/** What to tell somebody whose link was refused. */
+function refusalMessage(reason: LinkRefusal): string {
+	switch (reason) {
+		case 'already_linked':
+			return 'That account is already linked to somebody else here.';
+		case 'no_secret_key':
+			// Worth saying plainly: it is the operator's missing configuration, not the person's
+			// mistake, and no amount of retrying will change it.
+			return 'This site cannot store linked accounts yet. Its SECRET_KEY has not been set.';
+	}
 }
 
 /** Ends the session the request is carrying, if any. */
@@ -357,9 +454,10 @@ function parsePending(raw: string): Pending | null {
 		kind,
 		state,
 		verifier: typeof verifier === 'string' ? verifier : null,
-		// Anything but the exact word is the ordinary flow. A cookie claiming an intent this version
-		// does not have should sign somebody in, not attach an identity to an account.
-		intent: intent === 'link' ? 'link' : 'sign-in',
+		// Anything but an exact word this version knows is the ordinary flow. A cookie claiming an
+		// intent this build does not have should sign somebody in, not attach an identity or write a
+		// credential — the unrecognised case must fail towards the least powerful of the three.
+		intent: intent === 'link' || intent === 'connect' ? intent : 'sign-in',
 		userId: typeof userId === 'string' && userId !== '' ? userId : null,
 		// Re-checked on the way out as well as on the way in: this value came back from the
 		// visitor's browser, and a cookie is not a place where a check made earlier still holds.

@@ -70,6 +70,42 @@ export interface SignInProvider {
 	 * the request contains the client secret.
 	 */
 	identify(code: string, verifier: string | null, redirectUri: string): Promise<ProviderIdentity>;
+
+	/**
+	 * The same exchange, but keeping the credential — for linking an account rather than signing in.
+	 *
+	 * Optional, and its absence is a real answer rather than an unfinished one. Discord asks for
+	 * `identify` and nothing else, so its access token buys exactly what {@link identify} already
+	 * returned: keeping it would mean storing a secret that unlocks nothing anybody needs later. A
+	 * platform like that is linked for its handle and its avatar, and the row holds no token at all.
+	 *
+	 * Where it *is* implemented, it must exchange the code once. Calling {@link identify} as well
+	 * would present the same authorization code twice, which every provider rejects the second time.
+	 */
+	grant?(code: string, verifier: string | null, redirectUri: string): Promise<Grant>;
+}
+
+/**
+ * What came back from an exchange worth keeping.
+ *
+ * `scopes` is **what the provider actually granted**, not what was asked for. Several of these
+ * platforms quietly narrow a request — a person can untick a permission on the consent screen — and
+ * a stored list of what was requested makes a capability look available right up until the call that
+ * needs it fails. Empty where a provider does not say.
+ */
+export interface Grant {
+	readonly identity: ProviderIdentity;
+
+	/** Null for a provider whose token is of no use after the exchange. */
+	readonly accessToken: string | null;
+
+	/** Null where the provider issues none, which means the link is re-authorised by hand. */
+	readonly refreshToken: string | null;
+
+	/** Unix seconds, or null for a token the provider does not expire. */
+	readonly expiresAt: number | null;
+
+	readonly scopes: readonly string[];
 }
 
 /**

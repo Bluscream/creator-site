@@ -11,7 +11,7 @@
  */
 
 import { error, redirect } from '@sveltejs/kit';
-import { beginSignIn } from '#lib/server/auth/flow.js';
+import { INTENTS, beginSignIn } from '#lib/server/auth/flow.js';
 import { signInProvider } from '#lib/server/auth/sign-in-registry.js';
 import type { RequestHandler } from './$types';
 
@@ -24,11 +24,15 @@ export const GET: RequestHandler = (event) => {
 	// build supports but has not been given credentials for.
 	if (provider === null) error(404, 'No such sign-in method.');
 
-	// `?intent=link` is "add this as another way to sign in to the account I am already using", from
-	// the account page. Honoured only for somebody who *is* signed in; for anybody else it is an
-	// ordinary sign-in, because a link flow with no account to link to has nothing to do.
-	const link = event.url.searchParams.get('intent') === 'link' && principal !== null;
-	const options = link ? { intent: 'link' as const, userId: principal.userId } : {};
+	// `?intent=link` is "add this as another way to sign in to the account I am already using";
+	// `?intent=connect` is "link this platform account so the site can use it", which writes a
+	// `connections` row instead of an `identities` one. Both are honoured only for somebody who *is*
+	// signed in — for anybody else the flow has no account to attach anything to, so it falls back to
+	// an ordinary sign-in rather than failing on the way back from the provider.
+	const asked = event.url.searchParams.get('intent');
+	const intent = INTENTS.find((known) => known === asked) ?? 'sign-in';
+	const options =
+		intent === 'sign-in' || principal === null ? {} : { intent, userId: principal.userId };
 
 	redirect(303, beginSignIn(provider, event, options).toString());
 };
