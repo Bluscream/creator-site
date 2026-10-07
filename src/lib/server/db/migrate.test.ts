@@ -99,7 +99,7 @@ describe('the committed migrations', () => {
 			.filter((name) => !name.startsWith('__drizzle'))
 			.toSorted();
 
-		expect(present).toStrictEqual(['identities', 'sessions', 'users']);
+		expect(present).toStrictEqual(['connections', 'identities', 'sessions', 'users']);
 	});
 
 	it('produce the same columns as the fixture the suite runs on', () => {

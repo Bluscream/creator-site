@@ -76,6 +76,28 @@ const DDL = [
 		created_at INTEGER NOT NULL DEFAULT (unixepoch())
 	)`,
 
+	`CREATE TABLE connections (
+		id TEXT PRIMARY KEY NOT NULL,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		platform TEXT NOT NULL,
+		platform_account_id TEXT NOT NULL,
+		handle TEXT,
+		display_name TEXT,
+		avatar_url TEXT,
+		method TEXT NOT NULL,
+		access_token TEXT,
+		refresh_token TEXT,
+		expires_at INTEGER,
+		scopes TEXT NOT NULL DEFAULT '',
+		shown INTEGER NOT NULL DEFAULT false,
+		created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+		updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+	)`,
+
+	'CREATE UNIQUE INDEX connections_platform_account ON connections (platform, platform_account_id)',
+	'CREATE INDEX connections_user ON connections (user_id)',
+	'CREATE INDEX connections_platform ON connections (platform)',
+
 	'CREATE INDEX sessions_user ON sessions (user_id)',
 	'CREATE INDEX sessions_expires ON sessions (expires_at)'
 ] as const;

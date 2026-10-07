@@ -1,7 +1,7 @@
 /**
  * The database schema.
  *
- * Three tables, and they arrive together because {@link sessions} is the first state in this project
+ * Four tables. Three arrived together because {@link sessions} is the first state in this project
  * that genuinely cannot live in a file: a session has to be revocable, and "sign out everywhere" is
  * a `DELETE ... WHERE user_id = ?` rather than a cookie somebody still holds.
  *
@@ -20,7 +20,6 @@
  *
  * | stage | tables |
  * | --- | --- |
- * | 5 | provider credentials the admin edits, encrypted at rest |
  * | 6 | calendar events |
  * | 8 | link-click metrics |
  * | — | the admin's audit trail, alongside whatever first writes to it |
@@ -152,5 +151,113 @@ export const sessions = sqliteTable(
 
 		// Sweeping expired rows is a range scan over this.
 		index('sessions_expires').on(table.expiresAt)
+	]
+);
+
+/**
+ * How an account was linked.
+ *
+ * OAuth wherever a platform offers it, because the secret never passes through a form. A pasted
+ * token is the route for a platform with no OAuth for the capability, and the escape hatch when an
+ * OAuth application cannot be registered. A direct login is the last resort, for a platform that
+ * offers nothing else — declared per platform, never a default.
+ */
+export const LINK_METHODS = ['oauth', 'token', 'login'] as const;
+
+/** One of {@link LINK_METHODS}. */
+export type LinkMethod = (typeof LINK_METHODS)[number];
+
+/**
+ * A platform account somebody linked.
+ *
+ * ### One row, every purpose
+ *
+ * This is deliberately not "a credential for the post feed". It is an *account*, and what it can be
+ * used for follows from its platform and the scopes the platform actually granted: the links page
+ * reads it for a handle and a profile URL, the post reader reads it for a token, the live badge
+ * reads it for a channel id. An environment variable could serve exactly one of those, which is why
+ * adding a platform used to mean touching three places.
+ *
+ * ### Why not in {@link identities}
+ *
+ * A row that can sign you in and a row that holds somebody else's API token have different blast
+ * radii. `identities` stays a bare pointer with no secret in it, so a leak of it is a list of public
+ * account ids; this table holds credentials and is encrypted. Sharing one table would mean the
+ * cheaper row carried the more expensive row's risk.
+ *
+ * ### The tokens are encrypted
+ *
+ * `accessToken` and `refreshToken` hold what `src/lib/server/secrets.ts` produced, never a raw
+ * token. A SQLite file ends up in backups, snapshots and the copy somebody made before an upgrade,
+ * and losing it should not be the same as losing every creator's platform access.
+ */
+export const connections = sqliteTable(
+	'connections',
+	{
+		/** A UUID from the application. */
+		id: text('id').primaryKey().notNull(),
+
+		userId: text('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+
+		/** `twitch`, `youtube`, `kick`, `tiktok` — the platform's own id in this codebase. */
+		platform: text('platform').notNull(),
+
+		/** The platform's own id for the account. Never a handle, which its owner can change. */
+		platformAccountId: text('platform_account_id').notNull(),
+
+		/** What the account is called on that platform, for showing and for building a profile URL. */
+		handle: text('handle'),
+
+		/** A display name, where the platform has one separate from the handle. */
+		displayName: text('display_name'),
+
+		/** An absolute `https` avatar url, or null. Not copied — it is the platform's cdn. */
+		avatarUrl: text('avatar_url'),
+
+		/** One of {@link LINK_METHODS}, validated by the code that writes it. */
+		method: text('method').notNull().$type<LinkMethod>(),
+
+		/** Encrypted. Null for a link that carries no secret, such as a public-read-only platform. */
+		accessToken: text('access_token'),
+
+		/** Encrypted. Null where the platform issues no refresh token. */
+		refreshToken: text('refresh_token'),
+
+		/** Unix seconds the access token expires at, or null where it does not expire. */
+		expiresAt: integer('expires_at'),
+
+		/**
+		 * The scopes the platform actually granted, space-separated.
+		 *
+		 * What was granted, not what was asked for. A capability check has to read this rather than
+		 * assume the request succeeded in full, because a user can decline individual scopes on several
+		 * of these platforms and the result is a link that works for less than it looks like.
+		 */
+		scopes: text('scopes').notNull().default(''),
+
+		/** Whether this account is shown publicly as one of the creator's socials. */
+		shown: integer('shown', { mode: 'boolean' }).notNull().default(false),
+
+		createdAt: integer('created_at')
+			.notNull()
+			.default(sql`(unixepoch())`),
+
+		/** When the stored credential was last replaced, in unix seconds. */
+		updatedAt: integer('updated_at')
+			.notNull()
+			.default(sql`(unixepoch())`)
+	},
+	(table) => [
+		// One row per real-world account, for the same reason `identities` is unique: two rows for one
+		// account are two credentials that can disagree about which is current.
+		uniqueIndex('connections_platform_account').on(table.platform, table.platformAccountId),
+
+		// "What has this person linked", which is the account page.
+		index('connections_user').on(table.userId),
+
+		// "What is linked for this platform", which is how a provider resolves its credential.
+		index('connections_platform').on(table.platform)
 	]
 );

@@ -135,6 +135,28 @@ export const variables = defineEnvVars({
 		schema: z.url().optional()
 	},
 
+	// --- The key everything else is stored behind ------------------------------------------------
+
+	/**
+	 * The key that linked accounts' tokens are encrypted with.
+	 *
+	 * The one credential that stays an environment variable, because something has to be: a key stored
+	 * next to what it encrypts is decoration. Everything else — a creator's Twitch token, their
+	 * YouTube refresh token — moves into the database behind this.
+	 *
+	 * Any passphrase of 16 characters or more. It is stretched with scrypt rather than used raw, so it
+	 * does not have to be exactly 32 bytes of correctly generated base64; `openssl rand -base64 32` is
+	 * still the easiest way to produce one.
+	 *
+	 * **Changing it makes every linked account unreadable** and they have to be linked again. Without
+	 * it, linking is refused rather than storing a token in the clear.
+	 */
+	SECRET_KEY: {
+		description:
+			"Passphrase that linked accounts' tokens are encrypted with. Keep it and back it up.",
+		schema: z.string().min(16).optional()
+	},
+
 	// --- Who administers this installation -----------------------------------------------------
 
 	/**
