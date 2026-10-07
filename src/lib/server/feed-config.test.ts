@@ -118,3 +118,23 @@ describe('a document with settings out of range', () => {
 		expect(feedSchema.parse({ limit: 0 }).limit).toBe(0);
 	});
 });
+
+describe('the title the published feeds use', () => {
+	it('is absent by default, so the routes fall back to the host', () => {
+		expect(feedSchema.parse({}).title).toBeUndefined();
+	});
+
+	it('is trimmed, because a title with edges is a title somebody typed', () => {
+		expect(feedSchema.parse({ title: '  Bleichi Loveless  ' }).title).toBe('Bleichi Loveless');
+	});
+
+	it('rejects a title that is only whitespace, rather than publishing an empty one', () => {
+		// Trimmed before the minimum is checked, so `'   '` fails rather than becoming `''`. An
+		// empty `<title>` is valid Atom and useless to a reader.
+		expect(feedSchema.safeParse({ title: '   ' }).success).toBe(false);
+	});
+
+	it('rejects one too long to be a title', () => {
+		expect(feedSchema.safeParse({ title: 'x'.repeat(201) }).success).toBe(false);
+	});
+});

@@ -107,6 +107,19 @@ export const feedSchema = z.object({
 	refresh: z.number().int().min(60).max(86_400).default(DEFAULT_REFRESH),
 
 	/**
+	 * What the published Atom and JSON feeds call themselves.
+	 *
+	 * Optional, and the syndication routes fall back to the request's host — a feed must have a
+	 * title to be valid, and an installation that has not been told the creator's name should still
+	 * publish a valid one. Capped because this lands in a `<title>` element, not because Atom says
+	 * so.
+	 *
+	 * This belongs to the *feed* rather than the site only until there is a site document to put it
+	 * in; see the note on the syndication routes.
+	 */
+	title: z.string().trim().min(1).max(200).optional(),
+
+	/**
 	 * The configured sources, in the order they should appear.
 	 *
 	 * Each entry is tolerated independently — see the note at the top. `.catch(null)` turns a

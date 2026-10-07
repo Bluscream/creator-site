@@ -24,6 +24,22 @@ services:
       DATA_DIR: /data
       DATABASE_URL: /data/creator-site.db
 
+      # Trust the proxy's forwarded headers when working out the site's own url.
+      #
+      # Without these the app sees the request as it arrived at the container — `127.0.0.1:3000`,
+      # and a scheme it has to guess — so the published feeds at `/feed.atom` and `/feed.json` would
+      # advertise urls nobody can reach. Set here rather than left to the installer because the port
+      # below is on loopback: a reverse proxy is the assumed deployment, and these are what make it
+      # work.
+      #
+      # `ORIGIN` is *not* the knob for this — it does not change what the app sees as its own url.
+      # Checked against a running build, which is why these two are named instead.
+      #
+      # Delete them if you expose the container directly. A client could otherwise send its own
+      # `X-Forwarded-Host` and change what the feeds advertise.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+
     ports:
       # Host side only on loopback, because this is meant to sit behind a proxy that terminates TLS.
       # Change to `3000:3000` to expose it directly, and understand that you are then serving plain
