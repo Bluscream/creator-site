@@ -10,8 +10,10 @@
  */
 
 import { platformFor } from '../../platforms.js';
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import type { FeedSourceConfig } from '../feed-config.js';
+import { actorFrom, idFrom, instantFrom } from '../../canonical.js';
+import type { ContentKind } from '../../canonical.js';
 import type { PostSourceKind } from './posts-kinds.js';
 
 /** Trimmed to this before being stored, so a whole blog post does not land in the cache. */
@@ -104,30 +106,80 @@ export interface RawPost {
 	readonly image?: string | null | undefined;
 	readonly publishedAt?: string | null | undefined;
 	readonly author?: string | null | undefined;
+
+	/**
+	 * What kind of thing this is, for the label and the icon beside it.
+	 *
+	 * Defaults to `post`, which is what most of these platforms produce. A provider that knows better
+	 * — Twitch, which returns VODs and clips through one reader — says so, because "VOD" and "clip"
+	 * are words a viewer understands and "post" is not what either is.
+	 */
+	readonly kind?: ContentKind | undefined;
+
+	/**
+	 * Unix seconds the image URL stops working, where the platform signs it.
+	 *
+	 * Carried with the image rather than declared per provider, because it is a property of *that
+	 * URL*: TikTok's official cover images last six hours and its embed's last about forty-four, so a
+	 * provider reading both would have two answers to one question.
+	 */
+	readonly imageExpiresAt?: number | undefined;
+
+	/** The author's avatar, where the platform gives one. */
+	readonly authorAvatarUrl?: string | null | undefined;
+
+	/** The author's profile page, where the platform has one. */
+	readonly authorProfileUrl?: string | null | undefined;
 }
 
 /**
- * A raw post as a {@link Post}, or null when it is not one anybody can open.
+ * A raw post as a {@link ContentPiece}, or null when it is not one anybody can open.
  *
  * Null for a missing or non-`http` link rather than an empty string, because a row with nowhere to
  * go is worse than an absent row: it looks like content and does nothing.
  */
-export function buildPost(source: ResolvedSource, raw: RawPost): Post | null {
+export function buildPost(source: ResolvedSource, raw: RawPost): ContentPiece | null {
 	const url = raw.url;
 
 	if (typeof url !== 'string' || !url.startsWith('http')) return null;
 
+	const picture = image(raw.image);
+
 	return {
-		id: `${source.id}:${raw.id}`,
+		id: idFrom(source.id, raw.id),
 		source: source.id,
 		platform: source.platform,
+		kind: raw.kind ?? 'post',
 		title: plain(raw.title) ?? '',
 		url,
-		excerpt: excerpt(raw.excerpt),
-		image: image(raw.image),
-		published_at: when(raw.publishedAt),
-		author: plain(raw.author)
+		body: excerpt(raw.excerpt),
+		at: instantFrom(when(raw.publishedAt)),
+		author: actorFrom(plain(raw.author), {
+			...optional('avatarUrl', image(raw.authorAvatarUrl)),
+			...optional('profileUrl', image(raw.authorProfileUrl))
+		}),
+		media:
+			picture === null
+				? []
+				: [
+						{
+							url: picture,
+							kind: 'image' as const,
+							...optional('expiresAt', raw.imageExpiresAt)
+						}
+					]
 	};
+}
+
+/**
+ * One field, or nothing at all.
+ *
+ * `exactOptionalPropertyTypes` distinguishes "absent" from "present and undefined", and an actor
+ * with `avatarUrl: undefined` is a different value from one without the key — which matters because
+ * these are compared in tests and serialised into a feed.
+ */
+function optional<K extends string, V>(key: K, value: V | null | undefined): Record<K, V> | object {
+	return value === null || value === undefined ? {} : { [key]: value };
 }
 
 /**

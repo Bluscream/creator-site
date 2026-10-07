@@ -25,7 +25,7 @@
  *    failed refresh keeps the last good answer rather than blanking the platform.
  */
 
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import { feedSourceProvider } from './feed-source.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -157,7 +157,7 @@ export const youtubeSourceProvider: PostsSourceProvider = {
 		return identify(source.target) === null ? ADVICE : null;
 	},
 
-	async read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]> {
+	async read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]> {
 		const identity = identify(source.target);
 
 		// `unusable` is asked first by the orchestrator, so this is unreachable through it — but a

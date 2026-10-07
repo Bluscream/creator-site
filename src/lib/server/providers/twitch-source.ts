@@ -33,7 +33,7 @@
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import { credentialsFor } from './credentials.js';
 import { buildPost } from './post.js';
 import type { ResolvedSource } from './post.js';
@@ -262,7 +262,7 @@ async function fetchPosts(
 	token: string,
 	clientId: string,
 	context: SourceContext
-): Promise<readonly Post[]> {
+): Promise<readonly ContentPiece[]> {
 	const id = await userId(login, token, clientId, context);
 	const first = String(PER_KIND);
 
@@ -289,18 +289,22 @@ function entriesOf(
 	body: unknown,
 	kind: 'videos' | 'clips',
 	source: ResolvedSource
-): readonly Post[] {
+): readonly ContentPiece[] {
 	const parsed = listSchema.safeParse(body);
 
 	if (!parsed.success) return [];
 
 	return (parsed.data.data ?? [])
 		.map((entry) => toPost(entry, kind, source))
-		.filter((post): post is Post => post !== null);
+		.filter((post): post is ContentPiece => post !== null);
 }
 
 /** One entry as a post, or null when it is not one. */
-function toPost(entry: Entry, kind: 'videos' | 'clips', source: ResolvedSource): Post | null {
+function toPost(
+	entry: Entry,
+	kind: 'videos' | 'clips',
+	source: ResolvedSource
+): ContentPiece | null {
 	const id = entry.id;
 
 	if (id === undefined || id === '') return null;
@@ -308,6 +312,9 @@ function toPost(entry: Entry, kind: 'videos' | 'clips', source: ResolvedSource):
 	return buildPost(source, {
 		// Prefixed by kind, because a video and a clip can hold the same numeric id.
 		id: `${kind}-${id}`,
+		// "VOD" and "clip" are words a viewer understands; "post" is what neither of them is. One
+		// reader returns both, which is the whole reason the canonical kind is per piece.
+		kind: kind === 'videos' ? 'vod' : 'clip',
 		url: entry.url,
 		title: entry.title,
 		excerpt: describe(entry, kind),
@@ -340,7 +347,7 @@ export const twitchSourceProvider: PostsSourceProvider = {
 		return loginOf(source.target) === null ? ADVICE : null;
 	},
 
-	async read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]> {
+	async read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]> {
 		const { clientId, clientSecret } = credentialsFor('twitch');
 
 		if (clientId === undefined || clientSecret === undefined) {

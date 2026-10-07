@@ -26,7 +26,7 @@
  *   orchestrator replaces anything that is not a `SourceFailure` rather than passing it through.
  */
 
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import type { ResolvedSource } from './post.js';
 
 /**
@@ -108,7 +108,7 @@ export interface PostsSourceProvider {
 	unusable(source: ResolvedSource): string | null;
 
 	/** The source's posts, newest-first order not required — the orchestrator sorts. */
-	read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]>;
+	read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]>;
 
 	/**
 	 * How long this provider's image urls stay valid, in seconds. Absent means indefinitely.

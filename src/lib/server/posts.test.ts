@@ -18,13 +18,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Cache } from './cache.js';
-import type { Post } from '../posts.js';
+import type { ContentPiece } from '../posts.js';
 
 let directory: string;
 let cache: Cache;
 
 /** What each kind's provider will do on its next read, by kind. */
-const behaviour = new Map<string, () => Promise<readonly Post[]>>();
+const behaviour = new Map<string, () => Promise<readonly ContentPiece[]>>();
 
 /** How long a kind's provider says its image urls last, by kind. Absent means indefinitely. */
 const imageTtls = new Map<string, number>();
@@ -86,17 +86,18 @@ function backdate(seconds: number) {
 }
 
 /** A post from a source, at a given time. */
-function post(source: string, id: string, at: string): Post {
+function post(source: string, id: string, at: string): ContentPiece {
 	return {
 		id: `${source}:${id}`,
 		source,
 		platform: null,
 		title: id,
 		url: `https://example.com/${id}`,
-		excerpt: '',
-		image: null,
-		published_at: at,
-		author: null
+		kind: 'post',
+		body: '',
+		at,
+		author: null,
+		media: []
 	};
 }
 
@@ -176,7 +177,7 @@ describe('merging sources', () => {
 		// Plenty of feeds omit a date, and "undated" is still a post.
 		behaviour.set('feed', () => Promise.resolve([post('a', 'dated', '2026-01-01T00:00:00.000Z')]));
 		behaviour.set('bluesky', () =>
-			Promise.resolve([{ ...post('bluesky', 'undated', ''), published_at: null }])
+			Promise.resolve([{ ...post('bluesky', 'undated', ''), at: null }])
 		);
 
 		const { posts } = await freshPosts();
@@ -402,10 +403,10 @@ describe('the cap', () => {
  */
 describe('a source that has been failing for days', () => {
 	/** A post with a picture, as a provider that signs its thumbnails would return. */
-	function pictured(id: string, at: string): Post {
+	function pictured(id: string, at: string): ContentPiece {
 		return {
 			...post('a', id, at),
-			image: `https://cdn.test/${id}.jpg?x-expires=1`
+			media: [{ url: `https://cdn.test/${id}.jpg?x-expires=1`, kind: 'image' }]
 		};
 	}
 
@@ -444,7 +445,7 @@ describe('a source that has been failing for days', () => {
 
 		const second = await freshPosts();
 
-		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).toBeNull();
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.media).toEqual([]);
 	});
 
 	it('keeps the picture while the signature is still good', async () => {
@@ -460,7 +461,7 @@ describe('a source that has been failing for days', () => {
 
 		const second = await freshPosts();
 
-		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).not.toBeNull();
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.media).not.toEqual([]);
 	});
 
 	it('keeps the picture forever for a provider that does not sign them', async () => {
@@ -477,7 +478,7 @@ describe('a source that has been failing for days', () => {
 
 		const second = await freshPosts();
 
-		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.image).not.toBeNull();
+		expect((await second.posts({ cache, ttl: 0 })).posts[0]?.media).not.toEqual([]);
 	});
 
 	it('drops the picture on a source that has become unreadable, not only a failing one', async () => {
@@ -497,7 +498,7 @@ describe('a source that has been failing for days', () => {
 		const second = await freshPosts();
 		const result = await second.posts({ cache, ttl: 0 });
 
-		expect(result.posts[0]?.image).toBeNull();
+		expect(result.posts[0]?.media).toEqual([]);
 		expect(result.sources[0]?.reason).toMatch(/No reader/);
 	});
 });

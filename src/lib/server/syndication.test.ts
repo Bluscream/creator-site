@@ -17,7 +17,7 @@
 import { parseFeed } from 'feedsmith';
 import { describe, expect, it } from 'vitest';
 import { atom, jsonFeed, titleFrom, updatedAt } from './syndication.js';
-import type { Post, PostsResult } from '../posts.js';
+import type { ContentPiece, PostsResult } from '../posts.js';
 
 const identity = {
 	origin: 'https://example.com',
@@ -26,27 +26,28 @@ const identity = {
 };
 
 /** A post, with everything a feed could want. */
-function post(overrides: Partial<Post> = {}): Post {
+function post(overrides: Partial<ContentPiece> = {}): ContentPiece {
 	return {
 		id: 'youtube:abc',
 		source: 'youtube',
 		platform: 'youtube',
 		title: 'VR und Chill mit dem Otter',
 		url: 'https://www.youtube.com/watch?v=abc',
-		excerpt: 'Welcome to the Otterspace',
-		image: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
-		published_at: '2026-10-07T16:30:15.000Z',
-		author: 'BleichiLoveless',
+		kind: 'video',
+		body: 'Welcome to the Otterspace',
+		at: '2026-10-07T16:30:15.000Z',
+		author: { name: 'BleichiLoveless' },
+		media: [{ url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg', kind: 'image' }],
 		...overrides
 	};
 }
 
-function result(posts: readonly Post[]): PostsResult {
+function result(posts: readonly ContentPiece[]): PostsResult {
 	return { available: true, posts, sources: [], age: 0, stale: false };
 }
 
 /** Generated Atom, parsed back. Throws if what was written is not a feed at all. */
-function feedOf(posts: readonly Post[]) {
+function feedOf(posts: readonly ContentPiece[]) {
 	const read = parseFeed(atom(result(posts), identity));
 
 	if (read.format !== 'atom') throw new Error(`generated ${read.format}, not atom`);
@@ -55,7 +56,7 @@ function feedOf(posts: readonly Post[]) {
 }
 
 /** The first entry of the parsed feed. */
-function entryOf(posts: readonly Post[]) {
+function entryOf(posts: readonly ContentPiece[]) {
 	const entry = feedOf(posts).entries?.[0];
 
 	if (entry === undefined) throw new Error('no entries');
@@ -134,7 +135,7 @@ describe('the Atom feed', () => {
 	});
 
 	it('leaves the media namespace out when no post has a picture', () => {
-		expect(atom(result([post({ image: null })]), identity)).not.toContain('search.yahoo.com/mrss');
+		expect(atom(result([post({ media: [] })]), identity)).not.toContain('search.yahoo.com/mrss');
 	});
 
 	it('escapes a title that would otherwise break the document', () => {
@@ -147,19 +148,19 @@ describe('the Atom feed', () => {
 
 	it('titles a post that has none from its excerpt, as the UI does', () => {
 		// Bluesky and TikTok posts have no title. An entry with an empty one is valid and useless.
-		const entry = entryOf([post({ title: '', excerpt: 'A post about otters' })]);
+		const entry = entryOf([post({ title: '', body: 'A post about otters' })]);
 
 		expect(entry.title?.value).toBe('A post about otters');
 	});
 
 	it('falls back to the url for a post with neither', () => {
-		expect(entryOf([post({ title: '', excerpt: '' })]).title?.value).toBe(
+		expect(entryOf([post({ title: '', body: '' })]).title?.value).toBe(
 			'https://www.youtube.com/watch?v=abc'
 		);
 	});
 
 	it('omits the summary rather than emitting an empty one', () => {
-		expect(entryOf([post({ excerpt: '' })]).summary).toBeUndefined();
+		expect(entryOf([post({ body: '' })]).summary).toBeUndefined();
 	});
 
 	it('omits the author rather than emitting a blank one', () => {
@@ -167,7 +168,7 @@ describe('the Atom feed', () => {
 	});
 
 	it('still dates an undated post, because updated is required', () => {
-		const entry = entryOf([post({ published_at: null })]);
+		const entry = entryOf([post({ at: null })]);
 
 		expect(entry.updated).toBeDefined();
 		expect(entry.published).toBeUndefined();
@@ -194,26 +195,23 @@ describe('when the feed says it last changed', () => {
 		// A feed whose `updated` moved on every fetch would defeat every conditional request a
 		// reader makes, and would say the feed changed when only the clock did.
 		const when = updatedAt([
-			post({ published_at: '2026-10-07T16:30:15.000Z' }),
-			post({ published_at: '2026-01-01T00:00:00.000Z' })
+			post({ at: '2026-10-07T16:30:15.000Z' }),
+			post({ at: '2026-01-01T00:00:00.000Z' })
 		]);
 
 		expect(when.toISOString()).toBe('2026-10-07T16:30:15.000Z');
 	});
 
 	it('skips an undated post to reach a dated one', () => {
-		const when = updatedAt([
-			post({ published_at: null }),
-			post({ published_at: '2026-05-05T00:00:00.000Z' })
-		]);
+		const when = updatedAt([post({ at: null }), post({ at: '2026-05-05T00:00:00.000Z' })]);
 
 		expect(when.toISOString()).toBe('2026-05-05T00:00:00.000Z');
 	});
 
 	it('skips a date that will not parse', () => {
 		const when = updatedAt([
-			post({ published_at: 'last Tuesday' }),
-			post({ published_at: '2026-05-05T00:00:00.000Z' })
+			post({ at: 'last Tuesday' }),
+			post({ at: '2026-05-05T00:00:00.000Z' })
 		]);
 
 		expect(when.toISOString()).toBe('2026-05-05T00:00:00.000Z');
@@ -241,11 +239,11 @@ interface JsonFeed {
 }
 
 describe('the JSON feed', () => {
-	function json(posts: readonly Post[]): JsonFeed {
+	function json(posts: readonly ContentPiece[]): JsonFeed {
 		return jsonFeed(result(posts), { ...identity, path: '/feed.json' }) as JsonFeed;
 	}
 
-	function item(posts: readonly Post[]): Record<string, unknown> {
+	function item(posts: readonly ContentPiece[]): Record<string, unknown> {
 		const first = json(posts).items?.[0];
 
 		if (first === undefined) throw new Error('no items');
@@ -277,14 +275,14 @@ describe('the JSON feed', () => {
 	});
 
 	it('omits a field rather than carrying it empty', () => {
-		const one = item([post({ title: '', excerpt: '', image: null, author: null })]);
+		const one = item([post({ title: '', body: '', media: [], author: null })]);
 
 		expect(Object.keys(one).toSorted()).toStrictEqual(['date_published', 'id', 'tags', 'url']);
 	});
 
 	it('omits the date rather than inventing one, unlike Atom', () => {
 		// JSON Feed has no required date, so there is nothing to invent and an absent one is honest.
-		expect(item([post({ published_at: null })])).not.toHaveProperty('date_published');
+		expect(item([post({ at: null })])).not.toHaveProperty('date_published');
 	});
 
 	it('is valid with no posts at all', () => {

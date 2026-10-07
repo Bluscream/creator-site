@@ -1,62 +1,25 @@
 /**
  * The creator's posts from every platform, merged into one list.
  *
- * These types are this project's own, not any provider's. A provider's job is to return *this*
- * shape, so the UI has one row renderer rather than one per platform — whether the row came from a
- * YouTube Atom entry, Twitch's Helix JSON or somebody's blog.
+ * The item type is {@link ContentPiece} from `src/lib/canonical.ts`, re-exported here rather than
+ * declared again. That is the point of the canonical layer: a post, a VOD, a clip and an uploaded
+ * video are the same kind of thing, so they are the same type — and a row renderer written for one
+ * draws all of them. This module is what the *posts capability* adds on top: how sources are
+ * reported, how freshness is reported, and which tabs a feed UI offers.
  *
- * Everything here is plain text bound for a text node or an `img` source. Nothing is markup, so
- * nothing downstream has to decide whether to trust it.
+ * Everything in a piece is plain text bound for a text node or a URL bound for an attribute. Nothing
+ * is markup, so nothing downstream has to decide whether to trust it.
  *
- * ### Why a post has no `html` field, and no `tags`
+ * ### Why a piece has no `html` field, and no `tags`
  *
  * It is a link-in-bio row: a title, a picture, a date and somewhere to go. Carrying a platform's
  * full rendered body would mean sanitising five platforms' HTML to show something no row displays.
  * If a post page ever exists, that is the point to add it, with the sanitiser it needs.
  */
 
-/** One post, after whatever platform it came from has been normalised away. */
-export interface Post {
-	/**
-	 * The source's id and the platform's own id, joined.
-	 *
-	 * Prefixed because two platforms can easily use the same numeric id, and stable across refreshes
-	 * so a client can tell a post it has already drawn from a new one.
-	 */
-	readonly id: string;
+export type { Actor, ContentKind, ContentPiece, Media } from './canonical.js';
 
-	/** Which configured source produced this, by its id. */
-	readonly source: string;
-
-	/** A key of the platform registry, or null for a source that is not a known platform. */
-	readonly platform: string | null;
-
-	/**
-	 * Never null: a post with no title renders with its excerpt, and an absent title is `''`.
-	 *
-	 * May equal the whole `excerpt`. Bluesky and TikTok have no title field, so the first line of the
-	 * text stands in — and for a short post the first line *is* the text. Measured against a live
-	 * TikTok account, where a description of nothing but hashtags came back identical in both. A row
-	 * drawing both must therefore skip the excerpt when it repeats the title rather than printing it
-	 * twice; that is the renderer's decision, which is why nothing is blanked here.
-	 */
-	readonly title: string;
-
-	/** Where the post is. Always `http`-prefixed — a post with no link is not a post. */
-	readonly url: string;
-
-	/** Markup stripped, entities decoded, cut to a readable length. `''` when there is none. */
-	readonly excerpt: string;
-
-	/** An `https` thumbnail, or null. */
-	readonly image: string | null;
-
-	/** ISO 8601 in UTC, or null for the many feeds that omit one. */
-	readonly published_at: string | null;
-
-	/** Who posted it, when the platform says. */
-	readonly author: string | null;
-}
+import type { ContentPiece } from './canonical.js';
 
 /**
  * How one configured source's last fetch went.
@@ -109,7 +72,7 @@ export interface Posts {
 	readonly available: boolean;
 
 	/** Newest first. A post with no date sorts last rather than being dropped. */
-	readonly posts: readonly Post[];
+	readonly posts: readonly ContentPiece[];
 
 	readonly sources: readonly PostSource[];
 }

@@ -95,17 +95,18 @@ describe('an RSS feed', () => {
 			platform: null,
 			title: 'Hello & welcome',
 			url: 'https://example.com/a',
-			excerpt: 'Body here',
-			image: 'https://example.com/t.jpg',
-			published_at: '2026-10-06T11:34:44.000Z',
-			author: null
+			kind: 'post',
+			body: 'Body here',
+			at: '2026-10-06T11:34:44.000Z',
+			author: null,
+			media: [{ url: 'https://example.com/t.jpg', kind: 'image' }]
 		});
 	});
 
 	it('takes the thumbnail from an image enclosure', async () => {
 		const [post] = await feedSourceProvider.read(source, serving(rss));
 
-		expect(post?.image).toBe('https://example.com/t.jpg');
+		expect(post?.media[0]?.url).toBe('https://example.com/t.jpg');
 	});
 
 	it('ignores an enclosure that is not an image', async () => {
@@ -113,7 +114,7 @@ describe('an RSS feed', () => {
 		const audio = rss.replace('type="image/jpeg"', 'type="audio/mpeg"');
 		const [post] = await feedSourceProvider.read(source, serving(audio));
 
-		expect(post?.image).toBeNull();
+		expect(post?.media).toEqual([]);
 	});
 
 	it('falls back to the link when there is no guid', async () => {
@@ -135,9 +136,9 @@ describe('a YouTube Atom feed', () => {
 		expect(post).toMatchObject({
 			title: 'VR und Chill',
 			url: 'https://www.youtube.com/watch?v=nCGniMcYpyM',
-			excerpt: 'Welcome to the Otterspace',
-			image: 'https://i3.ytimg.com/vi/nCGniMcYpyM/hqdefault.jpg',
-			author: 'Someone'
+			body: 'Welcome to the Otterspace',
+			media: [{ url: 'https://i3.ytimg.com/vi/nCGniMcYpyM/hqdefault.jpg', kind: 'image' }],
+			author: { name: 'Someone' }
 		});
 	});
 
@@ -145,14 +146,14 @@ describe('a YouTube Atom feed', () => {
 		// A video edited later must not jump to the top of a chronological feed.
 		const [post] = await feedSourceProvider.read(source, serving(youtubeAtom));
 
-		expect(post?.published_at).toBe('2026-10-06T11:34:44.000Z');
+		expect(post?.at).toBe('2026-10-06T11:34:44.000Z');
 	});
 
 	it('uses updated when that is the only date', async () => {
 		const noPublished = youtubeAtom.replace(/<published>.*<\/published>/, '');
 		const [post] = await feedSourceProvider.read(source, serving(noPublished));
 
-		expect(post?.published_at).toBe('2026-10-06T12:00:00.000Z');
+		expect(post?.at).toBe('2026-10-06T12:00:00.000Z');
 	});
 
 	it('prefers the author summary over the full content', async () => {
@@ -165,7 +166,7 @@ describe('a YouTube Atom feed', () => {
 			</entry></feed>`;
 		const [post] = await feedSourceProvider.read(source, serving(withBoth));
 
-		expect(post?.excerpt).toBe('The short one');
+		expect(post?.body).toBe('The short one');
 	});
 
 	it('treats a link with no rel as the alternate, which Atom says it is', async () => {
@@ -187,8 +188,8 @@ describe('an RDF feed', () => {
 			id: 'blog:https://example.com/r1',
 			title: 'RDF post',
 			url: 'https://example.com/r1',
-			published_at: '2026-10-03T00:00:00.000Z',
-			author: 'Writer'
+			at: '2026-10-03T00:00:00.000Z',
+			author: { name: 'Writer' }
 		});
 	});
 });
@@ -201,9 +202,9 @@ describe('a JSON feed', () => {
 			id: 'blog:j-1',
 			title: 'JSON post',
 			url: 'https://example.com/j',
-			excerpt: 'body',
-			image: 'https://example.com/j.jpg',
-			author: 'Au'
+			body: 'body',
+			media: [{ url: 'https://example.com/j.jpg', kind: 'image' }],
+			author: { name: 'Au' }
 		});
 	});
 });

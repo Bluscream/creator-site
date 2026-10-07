@@ -29,7 +29,8 @@
  */
 
 import { generateAtomFeed, generateJsonFeed } from 'feedsmith';
-import type { Post, PostsResult } from '../posts.js';
+import { pictureOf } from '../canonical.js';
+import type { ContentPiece, PostsResult } from '../posts.js';
 
 /** How the feed describes itself, when nothing more specific is configured. */
 const FALLBACK_TITLE = 'Posts';
@@ -54,11 +55,11 @@ export interface FeedIdentity {
  * is the posts, which is what the field is for. Falls back to now for an empty feed, because the
  * element is required and there is no post to date it by.
  */
-export function updatedAt(posts: readonly Post[], now: Date = new Date()): Date {
+export function updatedAt(posts: readonly ContentPiece[], now: Date = new Date()): Date {
 	for (const post of posts) {
-		if (post.published_at === null) continue;
+		if (post.at === null) continue;
 
-		const parsed = new Date(post.published_at);
+		const parsed = new Date(post.at);
 
 		// Already sorted newest-first by the orchestrator, so the first dated post is the newest.
 		if (!Number.isNaN(parsed.getTime())) return parsed;
@@ -68,10 +69,10 @@ export function updatedAt(posts: readonly Post[], now: Date = new Date()): Date 
 }
 
 /** A post's date, or null when it has none a reader could use. */
-function dateOf(post: Post): Date | null {
-	if (post.published_at === null) return null;
+function dateOf(post: ContentPiece): Date | null {
+	if (post.at === null) return null;
 
-	const parsed = new Date(post.published_at);
+	const parsed = new Date(post.at);
 
 	return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -102,31 +103,43 @@ export function atom(result: PostsResult, identity: FeedIdentity): string {
 }
 
 /** One post as an Atom entry. */
-function entryOf(post: Post) {
+function entryOf(post: ContentPiece) {
 	const date = dateOf(post);
+	const picture = pictureOf(post);
 
 	return {
 		id: post.id,
 		// `title` falls back to the excerpt for the platforms whose posts have no title — the same
 		// rule the UI follows, so a feed reader and the site agree on what a post is called.
-		title: { value: post.title === '' ? post.excerpt || post.url : post.title },
+		title: { value: post.title === '' ? post.body || post.url : post.title },
 		links: [{ href: post.url, rel: 'alternate', type: 'text/html' }],
-		...(post.excerpt === '' ? {} : { summary: { value: post.excerpt } }),
-		...(post.author === null ? {} : { authors: [{ name: post.author }] }),
+		...(post.body === '' ? {} : { summary: { value: post.body } }),
+		...(post.author === null
+			? {}
+			: {
+					authors: [
+						{
+							name: post.author.name,
+							...(post.author.profileUrl === undefined ? {} : { uri: post.author.profileUrl })
+						}
+					]
+				}),
 
 		// `updated` is required, so an undated post is dated by the feed's own newest — the honest
 		// alternative to dropping it, since the post itself is real.
-		updated: date ?? updatedAt(post.published_at === null ? [] : [post]),
+		updated: date ?? updatedAt(post.at === null ? [] : [post]),
 		...(date === null ? {} : { published: date }),
 
 		// The source is the one piece of per-post metadata worth syndicating: a reader can see that
 		// a post came from YouTube rather than Bluesky without parsing its url.
-		categories: [{ term: post.source }],
+		// A source-less piece carries no category rather than an empty one, because Atom's `term` is
+		// required and a reader filtering on it would otherwise see a category named "".
+		...(post.source === null ? {} : { categories: [{ term: post.source }] }),
 
 		// Atom has no element for a post's picture, so this is the `media` namespace — which is how
 		// YouTube's own Atom feed ships thumbnails, so it is what readers already understand. The
 		// generator declares the namespace on the feed only when an entry uses it.
-		...(post.image === null ? {} : { media: { thumbnails: [{ url: post.image }] } })
+		...(picture === null ? {} : { media: { thumbnails: [{ url: picture.url }] } })
 	};
 }
 
@@ -146,18 +159,28 @@ export function jsonFeed(result: PostsResult, identity: FeedIdentity): unknown {
 }
 
 /** One post as a JSON Feed item. */
-function itemOf(post: Post) {
+function itemOf(post: ContentPiece) {
 	const date = dateOf(post);
+	const picture = pictureOf(post);
 
 	return {
 		id: post.id,
 		url: post.url,
 		...(post.title === '' ? {} : { title: post.title }),
-		...(post.excerpt === '' ? {} : { summary: post.excerpt }),
-		...(post.image === null ? {} : { image: post.image }),
+		...(post.body === '' ? {} : { summary: post.body }),
+		...(picture === null ? {} : { image: picture.url }),
 		...(date === null ? {} : { date_published: date }),
-		...(post.author === null ? {} : { authors: [{ name: post.author }] }),
-		tags: [post.source]
+		...(post.author === null
+			? {}
+			: {
+					authors: [
+						{
+							name: post.author.name,
+							...(post.author.profileUrl === undefined ? {} : { url: post.author.profileUrl })
+						}
+					]
+				}),
+		...(post.source === null ? {} : { tags: [post.source] })
 	};
 }
 

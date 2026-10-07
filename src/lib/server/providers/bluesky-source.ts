@@ -21,13 +21,13 @@
  *
  * Nothing in the record is one. The first line of the text stands in, and the whole text becomes
  * the excerpt — otherwise every row would be headed by its own body. Where the PHP this replaces
- * fell back to the literal string `'Post'` for a post whose text is empty, this leaves the title
- * empty: `Post.title` is documented as rendering from the excerpt when it is blank, and a hardcoded
+ * fell back to the literal string `'ContentPiece'` for a post whose text is empty, this leaves the title
+ * empty: `ContentPiece.title` is documented as rendering from the excerpt when it is blank, and a hardcoded
  * English noun inside a provider is a string no translation could reach.
  */
 
 import { z } from 'zod';
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import { buildPost, headline } from './post.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -156,7 +156,7 @@ export const blueskySourceProvider: PostsSourceProvider = {
 		return handleOf(source.target) === null ? ADVICE : null;
 	},
 
-	async read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]> {
+	async read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]> {
 		const handle = handleOf(source.target);
 
 		if (handle === null) throw new SourceFailure(ADVICE);
@@ -186,12 +186,12 @@ export const blueskySourceProvider: PostsSourceProvider = {
 		return (parsed.data.feed ?? [])
 			.filter((entry) => entry.reason === undefined)
 			.map((entry) => toPost(entry.post, source))
-			.filter((post): post is Post => post !== null);
+			.filter((post): post is ContentPiece => post !== null);
 	}
 };
 
 /** One feed entry as a post, or null when it is not one. */
-function toPost(post: FeedPost | undefined, source: ResolvedSource): Post | null {
+function toPost(post: FeedPost | undefined, source: ResolvedSource): ContentPiece | null {
 	if (post === undefined) return null;
 
 	const { uri, cid, record, author, embed } = post;

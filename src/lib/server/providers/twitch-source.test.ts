@@ -257,10 +257,13 @@ describe('reading a channel', () => {
 			platform: 'twitch',
 			title: 'VR und Chill mit dem Otter',
 			url: 'https://www.twitch.tv/videos/335921245',
-			excerpt: 'A long stream about otters.',
-			image: 'https://static-cdn.jtvnw.net/cf_vods/abc/thumb/thumb0-480x270.jpg',
-			published_at: '2026-10-01T13:31:57.000Z',
-			author: 'Someone'
+			kind: 'vod',
+			body: 'A long stream about otters.',
+			media: [
+				{ url: 'https://static-cdn.jtvnw.net/cf_vods/abc/thumb/thumb0-480x270.jpg', kind: 'image' }
+			],
+			at: '2026-10-01T13:31:57.000Z',
+			author: { name: 'Someone' }
 		});
 	});
 
@@ -269,8 +272,9 @@ describe('reading a channel', () => {
 		const posts = await twitchSourceProvider.read(source, working());
 		const clip = posts.find((post) => post.id.includes('clips-'));
 
-		expect(clip?.excerpt).toBe('Clip by A Viewer');
-		expect(clip?.author).toBe('Someone');
+		expect(clip?.body).toBe('Clip by A Viewer');
+		expect(clip?.author?.name).toBe('Someone');
+		expect(clip?.kind).toBe('clip');
 	});
 
 	it('leaves a blank VOD description as no excerpt', async () => {
@@ -279,7 +283,7 @@ describe('reading a channel', () => {
 		});
 		const [post] = await twitchSourceProvider.read(source, context);
 
-		expect(post?.excerpt).toBe('');
+		expect(post?.body).toBe('');
 	});
 
 	it('skips an entry with no id rather than losing the call', async () => {

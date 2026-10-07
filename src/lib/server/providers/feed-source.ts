@@ -28,7 +28,7 @@
  */
 
 import { ParseError, parseFeed } from 'feedsmith';
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import { buildPost } from './post.js';
 import type { RawPost, ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -118,7 +118,7 @@ export const feedSourceProvider: PostsSourceProvider = {
 		return badTarget(source.target);
 	},
 
-	async read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]> {
+	async read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]> {
 		const response = await context.fetch(source.target);
 
 		if (!response.ok) {
@@ -174,10 +174,13 @@ function asDate(value: unknown): string | undefined {
 }
 
 /** Whichever format arrived, as posts. */
-function entriesOf(parsed: ReturnType<typeof parseFeed>, source: ResolvedSource): readonly Post[] {
+function entriesOf(
+	parsed: ReturnType<typeof parseFeed>,
+	source: ResolvedSource
+): readonly ContentPiece[] {
 	return rawOf(parsed)
 		.map((entry) => buildPost(source, entry))
-		.filter((post): post is Post => post !== null);
+		.filter((post): post is ContentPiece => post !== null);
 }
 
 /**

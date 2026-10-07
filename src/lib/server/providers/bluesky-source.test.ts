@@ -92,10 +92,11 @@ describe('reading an author feed', () => {
 			// otherwise every row would be headed by its own body.
 			title: 'A post about otters',
 			url: 'https://bsky.app/profile/someone.bsky.social/post/3kabcdef',
-			excerpt: 'A post about otters with a second line',
-			image: null,
-			published_at: '2026-10-05T10:00:00.000Z',
-			author: 'Someone'
+			kind: 'post',
+			body: 'A post about otters with a second line',
+			media: [],
+			at: '2026-10-05T10:00:00.000Z',
+			author: { name: 'Someone' }
 		});
 	});
 
@@ -107,11 +108,11 @@ describe('reading an author feed', () => {
 			})
 		);
 
-		expect(post?.author).toBe('someone.bsky.social');
+		expect(post?.author?.name).toBe('someone.bsky.social');
 	});
 
 	it('leaves the title empty for a post with no text, rather than inventing one', async () => {
-		// The PHP this replaces used the literal string 'Post' here. An English noun inside a
+		// The PHP this replaces used the literal string 'ContentPiece' here. An English noun inside a
 		// provider is a string no translation could reach, and an empty title is documented as
 		// rendering from the excerpt.
 		const [post] = await blueskySourceProvider.read(
@@ -154,7 +155,7 @@ describe('reading an author feed', () => {
 		});
 		const posts = await blueskySourceProvider.read(source, context);
 
-		expect(posts.map((post) => post.author)).toStrictEqual(['Someone']);
+		expect(posts.map((post) => post.author?.name)).toStrictEqual(['Someone']);
 	});
 
 	it('tolerates fields the AppView adds without notice', async () => {
@@ -184,7 +185,7 @@ describe('the picture on a post', () => {
 			})
 		);
 
-		expect(post?.image).toBe('https://cdn.bsky.app/one.jpg');
+		expect(post?.media[0]?.url).toBe('https://cdn.bsky.app/one.jpg');
 	});
 
 	it('is a link card’s preview when that is the only picture', async () => {
@@ -202,7 +203,7 @@ describe('the picture on a post', () => {
 			})
 		);
 
-		expect(post?.image).toBe('https://cdn.bsky.app/card.jpg');
+		expect(post?.media[0]?.url).toBe('https://cdn.bsky.app/card.jpg');
 	});
 
 	it('is found one level down, where a quote-post nests its own media', async () => {
@@ -224,7 +225,7 @@ describe('the picture on a post', () => {
 			})
 		);
 
-		expect(post?.image).toBe('https://cdn.bsky.app/nested.jpg');
+		expect(post?.media[0]?.url).toBe('https://cdn.bsky.app/nested.jpg');
 	});
 
 	it('is null for an embed that carries no picture at all', async () => {
@@ -235,7 +236,7 @@ describe('the picture on a post', () => {
 			})
 		);
 
-		expect(post?.image).toBeNull();
+		expect(post?.media).toEqual([]);
 	});
 });
 

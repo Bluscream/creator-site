@@ -30,11 +30,12 @@
  */
 
 import { z } from 'zod';
+import { CONTENT_KINDS, MEDIA_KINDS, showable } from '../canonical.js';
 import { Cache } from './cache.js';
 import type { Parse } from './cache.js';
 import { feedConfig, feedSources } from './feed.js';
 import { log } from './log.js';
-import type { Post, PostSource, PostsResult } from '../posts.js';
+import type { ContentPiece, PostSource, PostsResult } from '../posts.js';
 import { NO_POSTS } from '../posts.js';
 import { sourceCacheKey } from './providers/post.js';
 import type { ResolvedSource } from './providers/post.js';
@@ -72,26 +73,49 @@ const ACCEPT =
  * into the UI, where a missing field is a rendering bug a long way from its cause. `Cache` treats a
  * parser that throws as a miss, so a stale-format entry is simply refetched.
  */
-const cachedPosts: Parse<readonly Post[]> = (value) =>
+const cachedActor = z.object({
+	name: z.string(),
+	id: z.string().optional(),
+	handle: z.string().optional(),
+	avatarUrl: z.string().optional(),
+	profileUrl: z.string().optional(),
+	colour: z.string().optional(),
+	badges: z
+		.array(z.object({ name: z.string(), type: z.string(), imageUrl: z.string().optional() }))
+		.optional()
+});
+
+const cachedMedia = z.object({
+	url: z.string(),
+	kind: z.enum(MEDIA_KINDS),
+	expiresAt: z.number().optional(),
+	width: z.number().optional(),
+	height: z.number().optional(),
+	alt: z.string().optional(),
+	animated: z.boolean().optional()
+});
+
+const cachedPosts: Parse<readonly ContentPiece[]> = (value) =>
 	z
 		.array(
 			z.object({
 				id: z.string(),
-				source: z.string(),
+				source: z.string().nullable(),
 				platform: z.string().nullable(),
+				kind: z.enum(CONTENT_KINDS),
 				title: z.string(),
 				url: z.string(),
-				excerpt: z.string(),
-				image: z.string().nullable(),
-				published_at: z.string().nullable(),
-				author: z.string().nullable()
+				body: z.string(),
+				at: z.string().nullable(),
+				author: cachedActor.nullable(),
+				media: z.array(cachedMedia)
 			})
 		)
 		.parse(value);
 
 /** What one source contributed, and how it went. */
 interface Outcome {
-	readonly posts: readonly Post[];
+	readonly posts: readonly ContentPiece[];
 	readonly reason: string | null;
 	readonly age: number | null;
 }
@@ -211,13 +235,23 @@ async function readSource(source: ResolvedSource, cache: Cache, ttl: number): Pr
  * actually wanted.
  */
 function stillShowable(
-	posts: readonly Post[],
+	posts: readonly ContentPiece[],
 	age: number | null,
 	imageTtl: number | undefined
-): readonly Post[] {
-	if (imageTtl === undefined || age === null || age < imageTtl) return posts;
+): readonly ContentPiece[] {
+	const dropped = posts.map((post) => {
+		// A platform that signs its own urls says when each one dies, which is more precise than any
+		// per-source guess: two readers of one platform can hand back urls with different lifetimes.
+		const live = showable(post.media);
 
-	return posts.map((post) => (post.image === null ? post : { ...post, image: null }));
+		return live.length === post.media.length ? post : { ...post, media: live };
+	});
+
+	if (imageTtl === undefined || age === null || age < imageTtl) return dropped;
+
+	// The fallback for a platform that signs urls without saying so. Configured per source, so it
+	// applies to the whole entry's age rather than to any one url.
+	return dropped.map((post) => (post.media.length === 0 ? post : { ...post, media: [] }));
 }
 
 /**
@@ -247,7 +281,7 @@ export async function posts(
 	// rejection here to lose the others to.
 	const outcomes = await Promise.all(sources.map((source) => readSource(source, cache, ttl)));
 
-	const merged: Post[] = [];
+	const merged: ContentPiece[] = [];
 	const report: PostSource[] = [];
 	let oldest = 0;
 
@@ -290,11 +324,11 @@ export async function posts(
  * "undated" is still a post. `''` compares below every ISO timestamp, which is what puts them
  * there.
  */
-function sorted(all: readonly Post[]): readonly Post[] {
-	return [...all].sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''));
+function sorted(all: readonly ContentPiece[]): readonly ContentPiece[] {
+	return [...all].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
 }
 
 /** The first `limit`, or all of them when the limit is not positive. */
-function capped(all: readonly Post[], limit: number): readonly Post[] {
+function capped(all: readonly ContentPiece[], limit: number): readonly ContentPiece[] {
 	return limit > 0 ? all.slice(0, limit) : all;
 }

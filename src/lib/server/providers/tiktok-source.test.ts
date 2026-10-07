@@ -99,10 +99,16 @@ describe('reading an account’s videos', () => {
 			platform: 'tiktok',
 			title: 'Welcome back to the otterspace',
 			url: `https://www.tiktok.com/@someone/video/${NEWEST}`,
-			excerpt: 'Welcome back to the otterspace #comeback #vrchat',
-			image: `https://p16-common-sign.tiktokcdn-eu.com/${NEWEST}.image?x-expires=1791550800`,
-			published_at: '2026-10-01T13:31:57.000Z',
-			author: 'Someone'
+			body: 'Welcome back to the otterspace #comeback #vrchat',
+			media: [
+				{
+					url: `https://p16-common-sign.tiktokcdn-eu.com/${NEWEST}.image?x-expires=1791550800`,
+					kind: 'image'
+				}
+			],
+			kind: 'video',
+			at: '2026-10-01T13:31:57.000Z',
+			author: { name: 'Someone' }
 		});
 	});
 
@@ -145,7 +151,7 @@ describe('reading an account’s videos', () => {
 			answering(embed([video(NEWEST)], { uniqueId: 'someone' }))
 		);
 
-		expect(post?.author).toBe('someone');
+		expect(post?.author?.name).toBe('someone');
 	});
 
 	it('leaves out a private video, whose page nobody can open', async () => {
@@ -170,7 +176,7 @@ describe('reading an account’s videos', () => {
 		const [post] = await tiktokSourceProvider.read(source, answering(embed([video(NEWEST)])));
 
 		expect(post?.url).not.toContain('v16m');
-		expect(post?.image).not.toContain('v16m');
+		expect(post?.media[0]?.url).not.toContain('v16m');
 	});
 
 	it('is empty, not broken, for an account with no videos', async () => {

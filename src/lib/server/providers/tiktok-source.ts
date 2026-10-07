@@ -35,7 +35,7 @@
  */
 
 import { z } from 'zod';
-import type { Post } from '../../posts.js';
+import type { ContentPiece } from '../../posts.js';
 import { buildPost, headline } from './post.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -195,7 +195,7 @@ export const tiktokSourceProvider: PostsSourceProvider = {
 		return handleOf(source.target) === null ? ADVICE : null;
 	},
 
-	async read(source: ResolvedSource, context: SourceContext): Promise<readonly Post[]> {
+	async read(source: ResolvedSource, context: SourceContext): Promise<readonly ContentPiece[]> {
 		const handle = handleOf(source.target);
 
 		if (handle === null) throw new SourceFailure(ADVICE);
@@ -225,11 +225,11 @@ export const tiktokSourceProvider: PostsSourceProvider = {
 			(page.videoList ?? [])
 				.filter((video) => video.privateItem !== true)
 				.map((video) => toPost(video, source, handle, author))
-				.filter((post): post is Post => post !== null)
+				.filter((post): post is ContentPiece => post !== null)
 				// Sorted here rather than left to the orchestrator, because the orchestrator sorts the
 				// merged list and a pinned video would still be wrong relative to this account's own.
 				// `??` only to satisfy the type: `toPost` drops a video it could not date.
-				.toSorted((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''))
+				.toSorted((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
 		);
 	}
 };
@@ -250,7 +250,12 @@ async function body(response: Response): Promise<string> {
 }
 
 /** One listed video as a post, or null when it is not one. */
-function toPost(video: Video, source: ResolvedSource, handle: string, author: string): Post | null {
+function toPost(
+	video: Video,
+	source: ResolvedSource,
+	handle: string,
+	author: string
+): ContentPiece | null {
 	const { id, desc } = video;
 
 	if (id === undefined || !SNOWFLAKE.test(id)) return null;
@@ -266,6 +271,7 @@ function toPost(video: Video, source: ResolvedSource, handle: string, author: st
 
 	return buildPost(source, {
 		id,
+		kind: 'video',
 		url: `https://www.tiktok.com/@${encodeURIComponent(owner)}/video/${encodeURIComponent(id)}`,
 		title: headline(desc),
 		excerpt: desc,
