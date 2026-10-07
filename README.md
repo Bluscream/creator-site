@@ -301,6 +301,26 @@ next request rather than after an arbitrary interval. Size is in the stamp becau
 filesystem clock can give two writes the same mtime, and the admin's atomic save is a `rename` —
 exactly when two writes land close together.
 
+**Writing is the opposite of reading in every way.** `write()` validates first and refuses rather
+than throwing, so the admin can show which field is wrong; takes a lock, so the version check and
+the write are one step; copies the current document into `<DATA_DIR>/backups/<name>/` keeping the
+last 20, because the point of configuration-as-a-file is that a mistake is recoverable; and replaces
+by `rename`, so a reader never sees half a document. It writes the _parsed_ value, defaults filled
+in, so the file on disk is the whole document rather than only what someone changed.
+
+A save is optimistic: `version()` hands the editor a token and `write(value, { expect })` refuses
+with `conflict` if the file has changed since, so two admins with the editor open are told rather
+than the second silently winning. The token is a **content hash**, not a timestamp — two saves
+inside the same coarse tick share an mtime, so a timestamp token would let the second look like it
+had seen the first.
+
+Two details in there were bugs first and comments second. The backups are named with a **sequence
+number** ahead of the timestamp: named by timestamp with a content hash to break ties, two saves in
+the same millisecond sort by _content_, and pruning by name then deletes the newer one — a test that
+writes 25 documents in a loop caught it keeping a version older than the window. And the write drops
+the read cache explicitly, because a `rename` inside one tick can change neither mtime nor size, so
+the next read would otherwise serve what was just replaced.
+
 ## Live updates: SSE out, one socket in
 
 The live parts of the page — the chat overlay, the support toasts, the live badge — are pushed, not

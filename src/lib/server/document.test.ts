@@ -7,12 +7,20 @@
  * file, and they assert what survives rather than that an error was raised.
  */
 
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	utimesSync,
+	writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { document } from './document.js';
+import type { WriteResult } from './document.js';
 
 let directory: string;
 
@@ -199,5 +207,275 @@ describe('a schema that cannot default', () => {
 		const required = z.object({ name: z.string() });
 
 		expect(() => document('broken', required).read()).toThrow(/cannot produce a document/);
+	});
+});
+
+/**
+ * A refusal's issue lines, or an empty list.
+ *
+ * A helper rather than an inline conditional at each use, because narrowing a discriminated union
+ * inside an `expect` argument reads as noise and the lint rules object to it with reason.
+ */
+function issuesOf(result: WriteResult<unknown>): readonly string[] {
+	return !result.ok && result.reason !== 'conflict' ? result.issues : [];
+}
+
+/** The version a conflict reports, or null. */
+function conflictVersion(result: WriteResult<unknown>): string | null {
+	return !result.ok && result.reason === 'conflict' ? result.version : null;
+}
+
+/**
+ * Writing, which is the opposite of reading in every way that matters.
+ *
+ * Reading is lenient and cannot fail; writing is strict and refuses. The cases worth having are the
+ * ones where a plausible implementation loses data: a save that clobbers a concurrent one, a save
+ * that leaves no way back, and a save that leaves a half-written file behind.
+ */
+describe('writing a document', () => {
+	/** Every backup kept for a document, oldest first. */
+	function backupsOf(name: string): string[] {
+		try {
+			return readdirSync(join(directory, 'backups', name)).toSorted();
+		} catch {
+			return [];
+		}
+	}
+
+	it('creates the document and its directory on a fresh install', async () => {
+		const config = document('fresh', schema);
+		const written = await config.write({ limit: 7 });
+
+		expect(written.ok).toBe(true);
+		expect(config.read().limit).toBe(7);
+	});
+
+	it('fills in the defaults, so the file on disk is the whole document', async () => {
+		// A creator reading the file should see every setting, not only the ones they changed.
+		const config = document('whole', schema);
+
+		await config.write({ limit: 7 });
+
+		expect(JSON.parse(readFileSync(config.path, 'utf8'))).toStrictEqual({
+			enabled: true,
+			limit: 7,
+			names: []
+		});
+	});
+
+	it('writes something a person can read and diff', async () => {
+		const config = document('pretty', schema);
+
+		await config.write({ limit: 7 });
+
+		const text = readFileSync(config.path, 'utf8');
+
+		expect(text).toContain('\n\t"limit": 7');
+		expect(text.endsWith('\n')).toBe(true);
+	});
+
+	it('refuses a document the schema rejects, and says which field', async () => {
+		// Strictness belongs here: this is the one place a mistake can still be reported to the
+		// person making it, rather than silently defaulted over on the next read.
+		const config = document('invalid', schema);
+		const refused = await config.write({ limit: 10_000 });
+
+		expect(refused).toMatchObject({ ok: false, reason: 'invalid' });
+		expect(issuesOf(refused)).toContain('limit: Too big: expected number to be <=100');
+	});
+
+	it('does not touch the disk when it refuses', async () => {
+		// The existing document must survive a rejected save, and no backup should be taken of it.
+		writeDocument('untouched', JSON.stringify({ limit: 5 }));
+
+		const config = document('untouched', schema);
+
+		await config.write({ limit: 10_000 });
+
+		expect(config.read().limit).toBe(5);
+		expect(backupsOf('untouched')).toStrictEqual([]);
+	});
+
+	it('is visible to the next read, despite the cache', async () => {
+		// The read cache is keyed on mtime and size. A rename inside the same coarse timestamp tick
+		// can change neither, so the write has to drop the cache or serve what it just replaced.
+		writeDocument('cached', JSON.stringify({ limit: 5 }));
+
+		const config = document('cached', schema);
+
+		expect(config.read().limit).toBe(5);
+
+		await config.write({ limit: 6 });
+
+		expect(config.read().limit).toBe(6);
+	});
+
+	it('keeps what it replaced, so a mistake is recoverable', async () => {
+		writeDocument('kept', JSON.stringify({ limit: 5 }));
+
+		const config = document('kept', schema);
+
+		await config.write({ limit: 6 });
+
+		const backups = backupsOf('kept');
+
+		expect(backups).toHaveLength(1);
+		expect(
+			JSON.parse(readFileSync(join(directory, 'backups', 'kept', backups[0] ?? ''), 'utf8'))
+		).toStrictEqual({ limit: 5 });
+	});
+
+	it('does not back up a document that did not exist', async () => {
+		const config = document('nothing-to-keep', schema);
+
+		await config.write({ limit: 1 });
+
+		expect(backupsOf('nothing-to-keep')).toStrictEqual([]);
+	});
+
+	it('keeps twenty versions and no more', async () => {
+		const config = document('pruned', schema);
+
+		// 22 writes: the first creates the file, so 21 of them replace something.
+		for (let limit = 1; limit <= 22; limit += 1) {
+			await config.write({ limit });
+		}
+
+		expect(backupsOf('pruned')).toHaveLength(20);
+	});
+
+	it('keeps the newest twenty, not the oldest', async () => {
+		const config = document('pruned-order', schema);
+
+		for (let limit = 1; limit <= 25; limit += 1) {
+			await config.write({ limit });
+		}
+
+		const backups = backupsOf('pruned-order');
+		const limits = backups.map(
+			(entry) =>
+				(
+					JSON.parse(readFileSync(join(directory, 'backups', 'pruned-order', entry), 'utf8')) as {
+						limit: number;
+					}
+				).limit
+		);
+
+		// The last backup taken is of the document written by the second-to-last write.
+		expect(limits.at(-1)).toBe(24);
+		expect(Math.min(...limits)).toBe(5);
+	});
+
+	it('does not lose a backup to another save in the same millisecond', async () => {
+		// Named by timestamp alone, two saves inside one tick would give the second backup the
+		// first's name and the earlier version would be gone.
+		const config = document('same-tick', schema);
+
+		await config.write({ limit: 1 });
+		await Promise.all([config.write({ limit: 2 }), config.write({ limit: 3 })]);
+
+		expect(backupsOf('same-tick').length).toBeGreaterThanOrEqual(2);
+	});
+});
+
+describe('an optimistic write', () => {
+	it('accepts a save against the version that was read', async () => {
+		writeDocument('optimistic', JSON.stringify({ limit: 5 }));
+
+		const config = document('optimistic', schema);
+		const seen = config.version();
+
+		expect(await config.write({ limit: 6 }, { expect: seen })).toMatchObject({ ok: true });
+	});
+
+	it('refuses a save against a version that has been replaced', async () => {
+		// Two admins with the editor open. The second must be told rather than silently winning.
+		writeDocument('clobber', JSON.stringify({ limit: 5 }));
+
+		const config = document('clobber', schema);
+		const seen = config.version();
+
+		await config.write({ limit: 6 });
+
+		const refused = await config.write({ limit: 7 }, { expect: seen });
+
+		expect(refused).toMatchObject({ ok: false, reason: 'conflict' });
+		expect(config.read().limit).toBe(6);
+	});
+
+	it('hands back the current version with the conflict, so the caller can show it', async () => {
+		writeDocument('conflict-version', JSON.stringify({ limit: 5 }));
+
+		const config = document('conflict-version', schema);
+		const stale = config.version();
+
+		await config.write({ limit: 6 });
+
+		const refused = await config.write({ limit: 7 }, { expect: stale });
+
+		expect(conflictVersion(refused)).toBe(config.version());
+	});
+
+	it('identifies a version by content, not by timestamp', () => {
+		// Two writes inside the same coarse tick produce the same mtime. A timestamp-based token
+		// would make the second save look like it had seen the first.
+		writeDocument('by-content', JSON.stringify({ limit: 5 }));
+
+		const config = document('by-content', schema);
+		const before = config.version();
+
+		writeDocument('by-content', JSON.stringify({ limit: 6 }));
+		utimesSync(config.path, new Date(0), new Date(0));
+
+		expect(config.version()).not.toBe(before);
+	});
+
+	it('is not a conflict with itself when the document has not changed', async () => {
+		writeDocument('idempotent', JSON.stringify({ limit: 5 }));
+
+		const config = document('idempotent', schema);
+		const seen = config.version();
+
+		expect(await config.write({ limit: 5 }, { expect: seen })).toMatchObject({ ok: true });
+	});
+
+	it('expresses creating a document that does not exist yet', async () => {
+		const config = document('creation', schema);
+
+		expect(config.version()).toBe('absent');
+		expect(await config.write({ limit: 3 }, { expect: 'absent' })).toMatchObject({ ok: true });
+	});
+
+	it('refuses a creation when somebody else got there first', async () => {
+		const config = document('race-to-create', schema);
+		const absent = config.version();
+
+		writeDocument('race-to-create', JSON.stringify({ limit: 9 }));
+
+		expect(await config.write({ limit: 3 }, { expect: absent })).toMatchObject({
+			ok: false,
+			reason: 'conflict'
+		});
+	});
+
+	it('overwrites unconditionally when no version is given', async () => {
+		// For a migration or a first-run write, where there is no editor to conflict with.
+		writeDocument('unconditional', JSON.stringify({ limit: 5 }));
+
+		const config = document('unconditional', schema);
+
+		expect(await config.write({ limit: 6 })).toMatchObject({ ok: true });
+		expect(config.read().limit).toBe(6);
+	});
+
+	it('returns the new version, so an editor can save twice without re-reading', async () => {
+		const config = document('chained', schema);
+		const first = await config.write({ limit: 1 });
+
+		expect(first.ok).toBe(true);
+
+		const next = first.ok ? first.version : '';
+
+		expect(await config.write({ limit: 2 }, { expect: next })).toMatchObject({ ok: true });
 	});
 });
