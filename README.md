@@ -82,6 +82,62 @@ There is exactly **one** in the project, and it should stay that way. `src/app.d
 `App` **namespace** and there is no module form of that declaration. It names the rule, covers one
 line, and carries its reason above it. Any other suppression should be argued for in review.
 
+## Languages
+
+English and German, with more addable in one place. Every user-facing string goes through Paraglide
+— `m.nav_home()` rather than `'Home'` — so a message that does not exist is a **compile error**, and
+`npm run check` is in the gate.
+
+### Adding a message
+
+1. Add the key to `messages/en.json` and `messages/de.json`, in sorted position.
+2. Name it `<namespace>_<name>` in lower snake case: `admin_save`, `error_not_found_title`. The
+   namespace is one per module and comes from a closed list in `src/lib/i18n.test.ts`.
+3. Use it as `m.admin_save()`.
+
+Adding a **language** is one edit to `project.inlang/settings.json`. `locales` and the `Locale` type
+are generated from it, `LOCALE_NAMES` in `src/lib/i18n.ts` becomes a compile error until the new
+language has a name, and the catalogue checks pick it up with no registration step. That last part
+is the point: the PHP checker this replaces had to be told about each new page by hand, and the two
+pages nobody remembered to tell it about went unchecked for months while it reported "Complete".
+
+### Which language a visitor gets
+
+Precedence, highest first (`strategy` in `vite.config.ts`):
+
+|                     |                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`               | `/de/chat` — explicit, shareable, crawlable, and cacheable, because each language is its own URL rather than one URL that varies by header |
+| `cookie`            | the visitor picked a language and it should outlive the tab                                                                                |
+| `preferredLanguage` | `Accept-Language`, so a first visit already arrives in the right language                                                                  |
+| `baseLocale`        | English                                                                                                                                    |
+
+The base language is served **unprefixed**: `/` is English, `/de` is German. That keeps the existing
+English URLs, but it breaks `preferredLanguage` on its own — `/` _matches_ the `url` strategy as
+English, so the strategies behind it are never consulted and a German browser would silently land on
+the English page. `handleBrowserLanguage` in `src/hooks.server.ts` closes that: for a page `GET` with
+no language cookie and no language in the URL, it negotiates `Accept-Language` and redirects once.
+Those responses carry `Vary: Accept-Language`, without which a cache would serve one visitor's
+language to the next.
+
+`/api/**` is excluded from all of it (`routeStrategies`). The API is not a page and has no language
+of its own; a client that wants a localized response asks for one.
+
+### What the checks catch, and what they do not
+
+`src/lib/i18n.test.ts` covers the failures a compiler cannot see: a key missing from a translation
+(which Paraglide silently serves in English), a German string that still _is_ the English string, a
+placeholder lost or invented in translation, an empty value, a misnamed key, an unknown namespace, an
+unsorted file. Each one was verified by planting the defect and watching it fail.
+
+Two gaps are **known and still open**, both to be closed when the first UI lands:
+
+- **A hardcoded string that never went through `m.*` at all.** This is the exact failure that shipped
+  in the PHP admin — headings and placeholders rendered English in a German page with nothing
+  reporting it — and no check here would see it. It needs a scanner over markup literals.
+- **Dead keys.** Nothing yet reports a catalogue entry no code refers to. Left out on purpose while
+  the catalogue is ahead of the UI, since every key would currently be reported.
+
 ## Checks before a commit exists
 
 **The git hooks are the only automatic enforcement this repository has.** Actions do not run under

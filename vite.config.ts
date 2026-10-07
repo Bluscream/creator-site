@@ -18,7 +18,24 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
-			emitTsDeclarations: true
+			emitTsDeclarations: true,
+
+			// Precedence, highest first. Each entry answers a different question, and dropping any one
+			// of them loses a behaviour the platform requires:
+			//
+			//   url               an explicit `/de/…` — shareable, crawlable, and cacheable, because
+			//                     each language is its own URL rather than one URL that varies by
+			//                     request header
+			//   cookie            the viewer picked a language, and that choice should outlive the tab
+			//   preferredLanguage the browser's Accept-Language, so a first visit already arrives in
+			//                     the right language without anyone being asked
+			//   baseLocale        English
+			strategy: ['url', 'cookie', 'preferredLanguage', 'baseLocale'],
+
+			// The API is not a page and has no language of its own: a client that wants a localized
+			// response asks for one explicitly. Without this, `/api/…` would be localized like a
+			// route and machine clients would be redirected to `/de/api/…`.
+			routeStrategies: [{ match: '/api/:path(.*)?', exclude: true }]
 		})
 	],
 	test: {

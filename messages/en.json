@@ -1,4 +1,18 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-	"hello_world": "Hello, {name} from en!"
+
+	"common_cancel": "Cancel",
+	"common_loading": "Loading…",
+	"common_retry": "Try again",
+	"common_save": "Save",
+	"common_updated_ago": "Updated {age} ago",
+
+	"error_not_found_body": "That page does not exist, or it has moved.",
+	"error_not_found_title": "Not found",
+	"error_unexpected_body": "Something went wrong at our end. Trying again may be enough.",
+	"error_unexpected_title": "Something went wrong",
+
+	"locale_switch_label": "Language",
+
+	"nav_home": "Home"
 }
