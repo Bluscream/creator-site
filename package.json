@@ -73,6 +73,7 @@
 		"read-last-lines": "^1.10.0",
 		"rotating-file-stream": "^3.2.10",
 		"synchra-ts": "^0.1.0",
+		"tar-stream": "^3.2.2",
 		"zod": "^4.6.5"
 	},
 	"devDependencies": {
@@ -89,6 +90,7 @@
 		"@types/culori": "^4.0.1",
 		"@types/node": "^26.6.4",
 		"@types/proper-lockfile": "^4.1.4",
+		"@types/tar-stream": "^3.1.5",
 		"@vitest/browser-playwright": "^4.1.8",
 		"drizzle-kit": "^0.31.10",
 		"eslint": "^10.4.1",

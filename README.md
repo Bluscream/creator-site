@@ -676,12 +676,48 @@ choice:
   `ts.sys.readFile`) and ESLint's module loading. Revisit once both support it.
 - **Vitest is pinned to 4.x**, because `vitest-browser-svelte` still peers on `vitest@^4`.
 
+## Backup and restore: one file, and nothing half-applied
+
+One password-protected archive holds the database and every configuration document:
+`tar` → `gzip -9` → AES-256-GCM with a scrypt-derived key, all from `node:crypto` and `node:zlib`
+plus `tar-stream`, so restoring needs nothing installed on a machine that is probably already
+broken. `src/lib/server/backup/archive.ts` is the container and knows nothing about this project;
+`src/lib/server/backup/index.ts` decides what goes in one.
+
+Four decisions are worth stating, because each one is a way this goes wrong quietly:
+
+- **The database cannot be copied as a file.** A live SQLite database has committed data in its
+  write-ahead log that is not in the `.db` file yet, so `tar`ing the file produces an archive that
+  restores cleanly in a test and silently loses the most recent writes months later. It goes
+  through `VACUUM INTO`, from a **read-only** connection, so taking a backup can never be the thing
+  that corrupts one. A test leaves a writer open with an uncheckpointed WAL and asserts the row
+  comes back.
+- **Compatibility is the migration list, not a version string.** `package.json` says `0.0.0` and
+  would keep saying it. What decides whether this build can use a database is which migrations it
+  has, and Drizzle records that in the database. A backup carrying a migration this build does not
+  ship is refused by name; one carrying fewer is rolled forward on the next open, which is the
+  direction a restore is usually for.
+- **Nothing is replaced until everything is checked.** A restore unpacks to a staging directory,
+  verifies every digest, opens the staged database and asks SQLite whether it is intact, and only
+  then renames things into place — and what was there before is moved aside, not deleted. Every
+  refusal test also asserts the install was left alone, because "it refused" and "it changed
+  nothing" are different claims.
+- **The archive is treated as hostile.** It is, by definition: a restore reads a file somebody was
+  sent. Traversing names, symlinks, hard links and decompression bombs are all refused, and the
+  whole header is the AES-GCM additional data so the key-derivation parameters written into it
+  cannot be weakened by an attacker.
+
+Uploads, themes and the plugin list belong in here too and are not written yet, because none of
+them exist. They are more entries under their own prefixes; the restore's allow-list is the one
+place that needs extending.
+
 ## Layout
 
 ```
 src/lib/server/              server-only code — the bundler refuses to ship it to the browser
 src/lib/server/providers/    the capability seams; add a provider by adding a factory
 src/lib/server/auth/         the sign-in seam, the OAuth flow, the role guard
+src/lib/server/backup/       the backup container, and what an install puts in one
 src/lib/server/db/           the SQLite connection, the Drizzle schema and the migrator
 drizzle/                     generated migrations — committed, and applied on startup
 src/lib/components/          Svelte components
