@@ -42,7 +42,8 @@ const TARGETS: Readonly<Record<(typeof POST_SOURCE_KINDS)[number], string>> = {
 	bluesky: 'someone.bsky.social',
 	twitch: 'someone',
 	tiktok: '@someone',
-	kick: 'someone'
+	kick: 'someone',
+	grayjay: 'https://www.dailymotion.com/channel'
 };
 
 /** A source of a given kind, with a target its reader would accept. */

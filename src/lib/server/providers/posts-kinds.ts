@@ -28,6 +28,7 @@
  * | `bluesky` | the public AppView, unauthenticated                 | nothing         |
  * | `tiktok`  | the page TikTok renders for embedding, which is server-rendered with the post list | nothing |
  * | `kick`    | Kick's own maintained GrayJay plugin, run in a WebAssembly sandbox | nothing |
+ * | `grayjay` | the same route, for any other platform whose plugin works — Dailymotion, Odysee, SoundCloud, Nebula, Bitchute, Rumble, PeerTube, media.ccc.de | nothing |
  *
  * `kick` is the unusual one. Kick documents no public API for past broadcasts and fronts its own
  * client's endpoint with Cloudflare, so the route that works is the one the GrayJay app uses — and
@@ -65,7 +66,8 @@ export const POST_SOURCE_KINDS = [
 	'twitch',
 	'bluesky',
 	'tiktok',
-	'kick'
+	'kick',
+	'grayjay'
 ] as const;
 
 /** One of {@link POST_SOURCE_KINDS}. */

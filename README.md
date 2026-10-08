@@ -155,14 +155,15 @@ them. So beneath the capability there is a second seam whose unit is a **source 
 registry maps a kind to the reader for it rather than choosing one
 (`src/lib/server/providers/posts-source.ts`).
 
-| kind      | how it is read                                         | needs           | state                   |
-| --------- | ------------------------------------------------------ | --------------- | ----------------------- |
-| `feed`    | the site's own RSS, Atom, RDF or JSON Feed             | nothing         | **built**, run live     |
-| `youtube` | the channel feed YouTube publishes, as Atom            | nothing         | **built**, run live     |
-| `bluesky` | the public AppView, unauthenticated                    | nothing         | **built**, run live     |
-| `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | **built**, run live     |
-| `twitch`  | the official Helix API — videos and clips              | two credentials | **built**, not run live |
-| `kick`    | Kick's own maintained GrayJay plugin, sandboxed        | nothing         | **built**, run live     |
+| kind      | how it is read                                                                        | needs           | state                   |
+| --------- | ------------------------------------------------------------------------------------- | --------------- | ----------------------- |
+| `feed`    | the site's own RSS, Atom, RDF or JSON Feed                                            | nothing         | **built**, run live     |
+| `youtube` | the channel feed YouTube publishes, as Atom                                           | nothing         | **built**, run live     |
+| `bluesky` | the public AppView, unauthenticated                                                   | nothing         | **built**, run live     |
+| `tiktok`  | the page TikTok renders for embedding, server-rendered                                | nothing         | **built**, run live     |
+| `twitch`  | the official Helix API — videos and clips                                             | two credentials | **built**, not run live |
+| `kick`    | Kick's own maintained GrayJay plugin, sandboxed                                       | nothing         | **built**, run live     |
+| `grayjay` | the same route for Dailymotion, Odysee, SoundCloud, Nebula, Bitchute and media.ccc.de | nothing         | **built**, run live     |
 
 "Run live" means the reader has been pointed at the real endpoint and its output checked, which is
 how three separate bugs in this table's readers were found. `twitch` is the exception: it needs an
@@ -209,6 +210,19 @@ Its live tests are opt-in behind `RUN_LIVE=1`, because they reach both Kick and 
 host. That is where the one bug this reader has had so far was found: the host was filling GrayJay's
 value classes from the wrong argument shape, so every post arrived with a corrupt id, author and
 thumbnail while its name and url looked perfectly fine.
+
+**`grayjay` is the same route generalised.** Once the host library could parse HTML and resolve
+URLs, the number of plugins that load and return real content went from two to forty-five — at which
+point a reader per platform would have meant forty-three near-identical files. So Kick keeps only
+its own part (a handle like `xqc` is what somebody has to hand for Kick, not a url) and everything
+else is shared.
+
+The supported platforms are a **fixed table**, not a manifest url an admin can set. A plugin url in
+a config document would let an admin point the server at any JavaScript on the internet, and "it is
+sandboxed" is not a good enough answer to that. Every entry in the table is loaded and read from in
+a live test, which is what keeps it from claiming a platform it cannot deliver — Rumble is absent
+because its plugin needs TLS impersonation that Node cannot do, and PeerTube and Niconico because
+they loaded but returned nothing for the channels tried.
 
 **Twitch needs two credentials, and reports itself unusable without them.** `TWITCH_CLIENT_ID` and
 `TWITCH_CLIENT_SECRET`, from an application at [dev.twitch.tv](https://dev.twitch.tv/console/apps).
