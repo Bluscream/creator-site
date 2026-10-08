@@ -51,7 +51,18 @@ import type { PostsSourceProvider, SourceContext } from './posts-source.js';
 export const PLUGINS: readonly {
 	readonly name: string;
 	readonly manifest: string;
-	readonly hosts: readonly string[];
+
+	/** Matched as a suffix on the hostname, so `odysee.com` covers `www.odysee.com`. */
+	readonly hosts?: readonly string[];
+
+	/**
+	 * Matched on the whole url instead, for a platform whose hosts cannot be listed.
+	 *
+	 * PeerTube is the reason this exists: it is federated, so the instance a channel lives on is
+	 * whatever the creator chose, and a host list is the wrong shape. It is matched on the canonical
+	 * channel path instead.
+	 */
+	readonly matches?: (url: URL) => boolean;
 }[] = [
 	{
 		name: 'Dailymotion',
@@ -82,6 +93,19 @@ export const PLUGINS: readonly {
 		hosts: ['bitchute.com']
 	},
 	{
+		// Federated, so there is no host list to write. Matched on `/video-channels/<name>`, which is
+		// PeerTube's canonical channel path and unambiguous — the `/c/<name>` short form also works
+		// with the plugin, but it is not matched here because plenty of unrelated sites use `/c/` and
+		// attempting those as PeerTube would fail confusingly.
+		//
+		// A federated source means this will fetch from whatever instance an admin names. That is
+		// inherent to PeerTube and it is the admin's choice; the host library refuses private
+		// addresses, which is the part that would otherwise be dangerous.
+		name: 'PeerTube',
+		manifest: 'https://plugins.grayjay.app/PeerTube/PeerTubeConfig.json',
+		matches: (url) => /^\/video-channels\/[^/]+\/?$/.test(url.pathname)
+	},
+	{
 		// Not published through `plugins.grayjay.app`, which is ordinary: plenty of plugins in the
 		// index are hosted by whoever wrote them.
 		name: 'media.ccc.de',
@@ -96,29 +120,43 @@ export const PLUGINS: readonly {
 // - Rumble declares the `HttpImp` package, so the host refuses it by name. TLS fingerprint
 //   impersonation needs a stack presenting a browser's exact ClientHello, which Node has not got,
 //   so this one cannot be made to work here at any version.
-// - PeerTube and Niconico load and negotiate a feed type but returned nothing for the channels
-//   tried. A table entry is a claim that a platform can be read, and listing a plugin whose channel
-//   reads come back empty would offer an admin a source that silently contributes nothing — the
-//   exact failure this project goes out of its way to avoid everywhere else.
+// - Niconico loads and negotiates a feed type but returned nothing for the channel tried. A table
+//   entry is a claim that a platform can be read, and listing a plugin whose channel reads come
+//   back empty would offer an admin a source that silently contributes nothing — the exact failure
+//   this project goes out of its way to avoid everywhere else.
 //
-// Both are worth revisiting, PeerTube in particular: it is federated, so the right channel url may
-// simply be a different shape than the one tried.
+// PeerTube was in this list and should not have been. It was failing for two reasons at once: the
+// host library was not honouring `allowUrls: ["everywhere"]`, so every request it made was refused,
+// and the channel urls tried happened to have no videos on them. Both are fixed, and it is in the
+// table above — which is the argument for revisiting an exclusion rather than treating it as
+// settled.
 
-/** The plugin that reads a url's host, or null when none of them does. */
+/**
+ * The plugin that reads a target, or null when none of them does.
+ *
+ * Host entries are tried before path matchers, so a platform that names its hosts always wins over
+ * one matching on a path shape — which is what keeps PeerTube's rule from claiming a url that a
+ * named platform would have handled.
+ */
 export function pluginFor(target: string): (typeof PLUGINS)[number] | null {
-	let host;
+	let url;
 
 	try {
-		host = new URL(target.includes('://') ? target : `https://${target}`).hostname.toLowerCase();
+		url = new URL(target.includes('://') ? target : `https://${target}`);
 	} catch {
 		return null;
 	}
 
-	return (
-		PLUGINS.find((plugin) =>
-			plugin.hosts.some((entry) => host === entry || host.endsWith(`.${entry}`))
-		) ?? null
+	if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+
+	const host = url.hostname.toLowerCase();
+	const byHost = PLUGINS.find((plugin) =>
+		(plugin.hosts ?? []).some((entry) => host === entry || host.endsWith(`.${entry}`))
 	);
+
+	if (byHost !== undefined) return byHost;
+
+	return PLUGINS.find((plugin) => plugin.matches?.(url) === true) ?? null;
 }
 
 /** What an admin is told when no plugin reads the host they gave. */

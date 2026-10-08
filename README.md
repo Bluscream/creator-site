@@ -155,15 +155,15 @@ them. So beneath the capability there is a second seam whose unit is a **source 
 registry maps a kind to the reader for it rather than choosing one
 (`src/lib/server/providers/posts-source.ts`).
 
-| kind      | how it is read                                                                        | needs           | state                   |
-| --------- | ------------------------------------------------------------------------------------- | --------------- | ----------------------- |
-| `feed`    | the site's own RSS, Atom, RDF or JSON Feed                                            | nothing         | **built**, run live     |
-| `youtube` | the channel feed YouTube publishes, as Atom                                           | nothing         | **built**, run live     |
-| `bluesky` | the public AppView, unauthenticated                                                   | nothing         | **built**, run live     |
-| `tiktok`  | the page TikTok renders for embedding, server-rendered                                | nothing         | **built**, run live     |
-| `twitch`  | the official Helix API — videos and clips                                             | two credentials | **built**, not run live |
-| `kick`    | Kick's own maintained GrayJay plugin, sandboxed                                       | nothing         | **built**, run live     |
-| `grayjay` | the same route for Dailymotion, Odysee, SoundCloud, Nebula, Bitchute and media.ccc.de | nothing         | **built**, run live     |
+| kind      | how it is read                                                                               | needs           | state                   |
+| --------- | -------------------------------------------------------------------------------------------- | --------------- | ----------------------- |
+| `feed`    | the site's own RSS, Atom, RDF or JSON Feed                                                   | nothing         | **built**, run live     |
+| `youtube` | the channel feed YouTube publishes, as Atom                                                  | nothing         | **built**, run live     |
+| `bluesky` | the public AppView, unauthenticated                                                          | nothing         | **built**, run live     |
+| `tiktok`  | the page TikTok renders for embedding, server-rendered                                       | nothing         | **built**, run live     |
+| `twitch`  | the official Helix API — videos and clips                                                    | two credentials | **built**, not run live |
+| `kick`    | Kick's own maintained GrayJay plugin, sandboxed                                              | nothing         | **built**, run live     |
+| `grayjay` | the same route for Dailymotion, Odysee, SoundCloud, Nebula, Bitchute, PeerTube, media.ccc.de | nothing         | **built**, run live     |
 
 "Run live" means the reader has been pointed at the real endpoint and its output checked, which is
 how three separate bugs in this table's readers were found. `twitch` is the exception: it needs an
@@ -220,9 +220,15 @@ else is shared.
 The supported platforms are a **fixed table**, not a manifest url an admin can set. A plugin url in
 a config document would let an admin point the server at any JavaScript on the internet, and "it is
 sandboxed" is not a good enough answer to that. Every entry in the table is loaded and read from in
-a live test, which is what keeps it from claiming a platform it cannot deliver — Rumble is absent
-because its plugin needs TLS impersonation that Node cannot do, and PeerTube and Niconico because
-they loaded but returned nothing for the channels tried.
+a live test, which is what keeps it from claiming a platform it cannot deliver. Rumble is absent
+because its plugin needs TLS impersonation Node cannot do, and Niconico because it loaded but
+returned nothing for the channel tried.
+
+PeerTube was excluded for that second reason and should not have been: it was failing for two
+reasons at once — a host-library bug that refused every request a wildcard plugin made, and a
+channel that genuinely had no videos. It is federated, so it is matched on its channel path rather
+than a host list, which also means this will fetch from whatever instance an admin names. The
+library refusing private addresses is what keeps that from being dangerous.
 
 **Twitch needs two credentials, and reports itself unusable without them.** `TWITCH_CLIENT_ID` and
 `TWITCH_CLIENT_SECRET`, from an application at [dev.twitch.tv](https://dev.twitch.tv/console/apps).

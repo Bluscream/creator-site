@@ -62,16 +62,53 @@ describe('choosing a plugin for a target', () => {
 		expect(grayjaySourceProvider.unusable(SOURCE)).toBeNull();
 	});
 
-	it('names every plugin exactly once and gives each at least one host', () => {
+	it('names every plugin exactly once and gives each a way to be matched', () => {
 		// A duplicate host would make which plugin reads it depend on table order, which is not
-		// something a reader should decide by accident.
-		const hosts = PLUGINS.flatMap((plugin) => plugin.hosts);
+		// something a reader should decide by accident. An entry with neither hosts nor a matcher is
+		// unreachable, which is worse than absent: it reads as supported and never is.
+		const hosts = PLUGINS.flatMap((plugin) => plugin.hosts ?? []);
 
 		expect(new Set(PLUGINS.map((plugin) => plugin.name)).size).toBe(PLUGINS.length);
 		expect(new Set(hosts).size).toBe(hosts.length);
-		expect(PLUGINS.every((plugin) => plugin.hosts.length > 0)).toBe(true);
+		expect(
+			PLUGINS.every((plugin) => (plugin.hosts ?? []).length > 0 || plugin.matches !== undefined)
+		).toBe(true);
 		expect(PLUGINS.every((plugin) => plugin.manifest.startsWith('https://'))).toBe(true);
 	});
+
+	it.each([
+		['the canonical channel path', 'https://peertube.futo.org/video-channels/futo', 'PeerTube'],
+		['with a trailing slash', 'https://framatube.org/video-channels/joinpeertube/', 'PeerTube'],
+		['on any instance, since it is federated', 'https://tilvids.com/video-channels/x', 'PeerTube']
+	])('matches a PeerTube url by %s', (_name, target, expected) => {
+		// Federated, so there is no host list to write — the channel path is what identifies it.
+		expect(pluginFor(target)?.name).toBe(expected);
+	});
+
+	it.each([
+		['a short form plenty of other sites use', 'https://example.com/c/something'],
+		['a video rather than a channel', 'https://peertube.futo.org/videos/watch/abc'],
+		['a deeper path', 'https://peertube.futo.org/video-channels/futo/videos']
+	])('does not claim %s for PeerTube', (_name, target) => {
+		// `/c/` is deliberately not matched: it is unambiguous for PeerTube only on a PeerTube
+		// instance, and attempting an unrelated site as PeerTube would fail confusingly.
+		expect(pluginFor(target)?.name).not.toBe('PeerTube');
+	});
+
+	it('prefers a named host over a path matcher', () => {
+		// Order matters here: a platform that names its hosts must win, or PeerTube's path rule could
+		// claim a url another entry would have handled properly.
+		expect(pluginFor('https://odysee.com/video-channels/someone')?.name).toBe('Odysee');
+	});
+
+	it.each([['file:///etc/passwd'], ['data:text/plain,x'], ['javascript:alert(1)']])(
+		'refuses the scheme in %s',
+		(target) => {
+			// A target is admin-supplied configuration, and a plugin must never be handed a non-http
+			// scheme to resolve against.
+			expect(pluginFor(target)).toBeNull();
+		}
+	);
 });
 
 describe('the date, which is not where the interface says', () => {
@@ -223,6 +260,10 @@ describe('naming a channel from its url', () => {
  *
  * The channels are long-standing accounts, and the assertion is about *shape* rather than content:
  * a test that fails because somebody deleted a video is a test nobody trusts.
+ *
+ * **It will flake occasionally.** It reaches seven third-party platforms, so a single run failing on
+ * one of them means a network hiccup rather than a regression — one such failure was seen in seven
+ * runs here. Re-run before believing it; if the same platform fails twice, that is the signal.
  */
 const live = process.env.RUN_LIVE === '1' ? describe : describe.skip;
 
@@ -245,7 +286,10 @@ live('every plugin in the table', () => {
 		['SoundCloud', 'https://soundcloud.com/octobersveryown'],
 		['Bitchute', 'https://www.bitchute.com/channel/bitchute/'],
 		['Nebula', 'https://nebula.tv/tldrnewsglobal'],
-		['media.ccc.de', 'https://media.ccc.de/c/38c3']
+		['media.ccc.de', 'https://media.ccc.de/c/38c3'],
+		// Federated, and the one entry that needs `allowUrls: ["everywhere"]` to work at all — the
+		// host library was silently refusing every request it made until that was recognised.
+		['PeerTube', 'https://peertube.futo.org/video-channels/futo']
 	])(
 		'%s reads a channel',
 		async (name, channel) => {
