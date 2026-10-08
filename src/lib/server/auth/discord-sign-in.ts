@@ -5,9 +5,22 @@
  * is kept is the set of decisions that file made and justified; what is dropped is the plumbing,
  * which `./oauth2.ts` does.
  *
- * Discord authenticates at the token endpoint with HTTP **Basic**, which is what `arctic` sent for it
- * and what this keeps. Twitch wants the secret in the body instead, which is why that choice is a
- * per-provider setting rather than a default.
+ * ### The secret goes in the body, not an HTTP Basic header
+ *
+ * Discord accepts either — its documentation says "all calls to the OAuth2 endpoints require either
+ * HTTP Basic authentication or `client_id` and `client_secret` supplied in the form data body" — and
+ * the body is the safe one, for a specific reason.
+ *
+ * RFC 6749 Appendix B requires the Basic credentials to be form-urlencoded *before* base64, with the
+ * unreserved set narrowed to letters and digits — so `-`, `_`, `.` and `~` all become percent
+ * escapes. `oauth4webapi` does that correctly; `arctic` did not, and sent the raw bytes. Discord
+ * describes Basic as plain base64 of `client_id:client_secret` and does not document decoding the
+ * value, and a Discord client secret is drawn from an alphabet that routinely contains `-` and `_`.
+ *
+ * So the two spellings are not reliably interchangeable here, and taking the spec-correct one on
+ * trust would have meant a 401 that reads like a wrong secret. The form body sidesteps it entirely:
+ * nothing re-encodes the credential on the way out. `./oauth2.ts` still supports `basic` for the
+ * platforms that require it, with the hazard recorded there.
  *
  * ### `identify` and nothing else
  *
@@ -111,7 +124,9 @@ function app(): OAuth2App {
 		clientSecret: DISCORD_CLIENT_SECRET,
 		authorizationEndpoint: AUTHORIZATION_ENDPOINT,
 		tokenEndpoint: TOKEN_ENDPOINT,
-		clientAuth: 'basic'
+		// Not Basic. See the note at the top — this is about the credential surviving the trip, not
+		// about preference.
+		clientAuth: 'body'
 	};
 }
 

@@ -26,8 +26,9 @@
  *
  * Two differences are real and were measured against each provider rather than assumed:
  *
- * - **Client authentication.** Discord wants HTTP Basic; Twitch wants the secret in the form body.
- *   `arctic` hard-coded one per provider and so does {@link ClientAuth} here.
+ * - **Client authentication.** Both providers here send the secret in the form body, but for
+ *   different reasons, and other platforms require an HTTP Basic header — so it stays per provider.
+ *   {@link ClientAuth} records the encoding hazard that makes the two not interchangeable.
  * - **Twitch's `scope`.** Twitch answers the token endpoint with `scope` as a JSON **array**. RFC
  *   6749 §5.1 requires a space-delimited **string**, and a specification-exact library refuses the
  *   response outright: `"response" body "scope" property must be a string`. So a provider may declare
@@ -57,7 +58,23 @@
 
 import * as oauth from 'oauth4webapi';
 
-/** How a provider wants the client secret presented at its token endpoint. */
+/**
+ * How a provider wants the client secret presented at its token endpoint.
+ *
+ * ### `basic` re-encodes the credential, and not every provider undoes that
+ *
+ * RFC 6749 Appendix B requires HTTP Basic credentials to be form-urlencoded *before* base64, with
+ * the unreserved set narrowed to letters and digits — so `-`, `_`, `.` and `~` become percent
+ * escapes. `oauth4webapi` does this correctly. A provider that documents Basic as plain base64 of
+ * `client_id:client_secret`, and does not say it decodes, will therefore compare against a different
+ * secret than the one in the dashboard whenever that secret contains one of those four characters.
+ * The symptom is a 401 that reads like a wrong secret.
+ *
+ * Discord is exactly that case, which is why it uses `body` — it accepts either, and `body` passes
+ * the credential through untouched. Prefer `body` for any provider that offers it, and reach for
+ * `basic` only where a provider requires it; then check what its documentation says about encoding
+ * before trusting a secret containing anything but letters and digits.
+ */
 export type ClientAuth = 'basic' | 'body';
 
 /** A provider's documented departure from the specification. */

@@ -208,11 +208,41 @@ describe('exchanging a code', () => {
 	});
 
 	it('puts the secret in the body where the provider wants that instead', async () => {
-		// Twitch. The opposite of the above, which is why this is per provider.
+		// The other half, which is why this is per provider.
 		await exchangeCode(TWITCHLIKE, callback());
 
 		expect(calls[0]?.authorization).toBeNull();
 		expect(new URLSearchParams(calls[0]?.body ?? '').get('client_secret')).toBe('a-client-secret');
+	});
+
+	it('sends a body credential exactly as it was given, punctuation and all', async () => {
+		// The regression this exists for. Real client secrets are drawn from alphabets that include
+		// `-` and `_`, and RFC 6749 Appendix B narrows the unreserved set to letters and digits — so an
+		// encoding step that is correct for Basic mangles the secret for a provider that compares the
+		// raw value. Discord documents Basic as plain base64 and says nothing about decoding, which is
+		// why it uses the body; this asserts the body really is lossless.
+		const awkward = 'sec-ret_with.punctuation~and-more';
+
+		await exchangeCode({ ...TWITCHLIKE, clientSecret: awkward }, callback());
+
+		expect(new URLSearchParams(calls[0]?.body ?? '').get('client_secret')).toBe(awkward);
+	});
+
+	it('re-encodes a Basic credential, which is the spec and also the hazard', async () => {
+		// Recorded rather than normalised away. A provider that does not form-urldecode its Basic
+		// header will compare against this, not against the secret in its dashboard — so whoever picks
+		// `basic` for the next platform needs this difference to be visible rather than discovered as
+		// a 401.
+		const awkward = 'sec-ret_with.punctuation~and-more';
+
+		await exchangeCode({ ...BASIC, clientSecret: awkward }, callback());
+
+		const sent = Buffer.from((calls[0]?.authorization ?? '').replace('Basic ', ''), 'base64')
+			.toString()
+			.split(':')[1];
+
+		expect(sent).not.toBe(awkward);
+		expect(decodeURIComponent(sent ?? '')).toBe(awkward);
 	});
 
 	it('reports a provider that said nothing about expiry as having no expiry', async () => {

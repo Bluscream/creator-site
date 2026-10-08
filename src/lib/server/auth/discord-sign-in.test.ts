@@ -56,6 +56,9 @@ const ACCOUNT = {
 /** What the stubbed token endpoint answers unless a test says otherwise. */
 let tokenResponse: () => Response;
 
+/** What was actually sent to the token endpoint, for the tests that care. */
+let tokenRequest: { authorization: string | null; body: string } | null;
+
 /** What the stubbed identity endpoint answers unless a test says otherwise. */
 let identityResponse: () => Response;
 
@@ -74,13 +77,24 @@ beforeEach(() => {
 		json({ access_token: 'an-access-token', token_type: 'Bearer', expires_in: 604_800 });
 	identityResponse = () => json(ACCOUNT);
 
-	vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
-		const url = String(input instanceof Request ? input.url : input);
+	tokenRequest = null;
 
-		if (url.includes('/oauth2/token')) return Promise.resolve(tokenResponse());
-		if (url.includes('/users/@me')) return Promise.resolve(identityResponse());
+	vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = input instanceof Request ? input : new Request(String(input), init);
+		const url = request.url;
 
-		return Promise.reject(new Error(`nothing stubbed for ${url}`));
+		if (url.includes('/oauth2/token')) {
+			tokenRequest = {
+				authorization: request.headers.get('authorization'),
+				body: await request.text()
+			};
+
+			return tokenResponse();
+		}
+
+		if (url.includes('/users/@me')) return identityResponse();
+
+		throw new Error(`nothing stubbed for ${url}`);
 	});
 });
 
@@ -302,5 +316,33 @@ describe('what a failure message is allowed to contain', () => {
 		const message = await messageFor(() => discordSignIn().identify(callback('c')));
 
 		expect(message).not.toContain('10.0.0.5');
+	});
+});
+
+describe('how Discord is authenticated at the token endpoint', () => {
+	it('sends the secret in the form body, never in a Basic header', async () => {
+		// Discord accepts either, and this picks the body deliberately: RFC 6749 Appendix B has Basic
+		// credentials form-urlencoded before base64, narrowing the unreserved set to letters and
+		// digits, so `-` and `_` — both common in a Discord client secret — become percent escapes.
+		// Discord documents Basic as plain base64 of `client_id:client_secret` and says nothing about
+		// decoding. The body passes the credential through untouched, so it cannot disagree.
+		await discordSignIn().identify(callback('c'));
+
+		expect(tokenRequest?.authorization).toBeNull();
+
+		const body = new URLSearchParams(tokenRequest?.body ?? '');
+
+		expect(body.get('client_id')).toBe('client-id');
+		expect(body.get('client_secret')).toBe('client-secret');
+	});
+
+	it('sends the PKCE verifier, which is what makes the challenge worth anything', async () => {
+		// A challenge sent at authorize time and no verifier at exchange time is PKCE in appearance
+		// only.
+		const { verifier } = await discordSignIn().authorize('s', REDIRECT);
+
+		await discordSignIn().identify({ ...callback('c'), verifier });
+
+		expect(new URLSearchParams(tokenRequest?.body ?? '').get('code_verifier')).toBe(verifier);
 	});
 });
