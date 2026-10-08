@@ -208,6 +208,10 @@ function toPost(post: FeedPost | undefined, source: ResolvedSource): ContentPiec
 	const text = record?.text ?? '';
 
 	return buildPost(source, {
+		// Read through `app.bsky.feed.getAuthorFeed` on the public AppView with no token, which is
+		// what makes this claim safe rather than optimistic: an unauthenticated AppView read cannot
+		// see a post the author has not published. Bluesky has no unlisted tier today.
+		visibility: 'public',
 		id: cid ?? rkey,
 		url: `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(rkey)}`,
 		title: headline(text),

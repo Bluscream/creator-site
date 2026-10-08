@@ -114,29 +114,37 @@ describe('where a source is cached', () => {
 
 describe('building a post', () => {
 	it('prefixes the id with the source, so two platforms cannot collide', () => {
-		expect(buildPost(source, { id: '12345', url: 'https://example.com/a' })?.id).toBe(
-			'youtube:12345'
-		);
+		expect(
+			buildPost(source, { visibility: 'public', id: '12345', url: 'https://example.com/a' })?.id
+		).toBe('youtube:12345');
 	});
 
 	it('refuses a post with no link', () => {
-		expect(buildPost(source, { id: '1', url: null })).toBeNull();
+		expect(buildPost(source, { visibility: 'public', id: '1', url: null })).toBeNull();
 	});
 
 	it('refuses a link that is not http, which a row could not open', () => {
 		// A row with nowhere to go looks like content and does nothing, which is worse than no row.
-		expect(buildPost(source, { id: '1', url: 'javascript:alert(1)' })).toBeNull();
-		expect(buildPost(source, { id: '1', url: 'data:text/html,x' })).toBeNull();
-		expect(buildPost(source, { id: '1', url: '/relative' })).toBeNull();
+		expect(
+			buildPost(source, { visibility: 'public', id: '1', url: 'javascript:alert(1)' })
+		).toBeNull();
+		expect(
+			buildPost(source, { visibility: 'public', id: '1', url: 'data:text/html,x' })
+		).toBeNull();
+		expect(buildPost(source, { visibility: 'public', id: '1', url: '/relative' })).toBeNull();
 	});
 
 	it('gives an absent title an empty string rather than null', () => {
 		// The row renders the excerpt in that case; a null would have to be handled by every caller.
-		expect(buildPost(source, { id: '1', url: 'https://example.com/a' })?.title).toBe('');
+		expect(
+			buildPost(source, { visibility: 'public', id: '1', url: 'https://example.com/a' })?.title
+		).toBe('');
 	});
 
 	it('carries the source and platform onto every post', () => {
-		expect(buildPost(source, { id: '1', url: 'https://example.com/a' })).toMatchObject({
+		expect(
+			buildPost(source, { visibility: 'public', id: '1', url: 'https://example.com/a' })
+		).toMatchObject({
 			source: 'youtube',
 			platform: 'youtube'
 		});
@@ -155,7 +163,7 @@ describe('building a post', () => {
 describe('a count the platform may or may not have sent', () => {
 	/** A raw post that is otherwise minimal, built. */
 	const built = (raw: Partial<Parameters<typeof buildPost>[1]>) =>
-		buildPost(source, { id: '1', url: 'https://example.com/a', ...raw });
+		buildPost(source, { visibility: 'public', id: '1', url: 'https://example.com/a', ...raw });
 
 	it('is null when the platform said nothing', () => {
 		expect(built({})).toMatchObject({ duration: null, views: null, live: false });

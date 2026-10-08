@@ -102,7 +102,11 @@ describe('an RSS feed', () => {
 			media: [{ url: 'https://example.com/t.jpg', kind: 'image' }],
 			duration: null,
 			views: null,
-			live: false
+			live: false,
+			// Asserted, not incidental: this is the provider's claim that what it read is public —
+			// a feed document is published by definition, item by item. A reader that
+			// starts using a credential has to change this line, which is the point of it being here.
+			visibility: 'public'
 		});
 	});
 

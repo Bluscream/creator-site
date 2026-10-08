@@ -283,6 +283,12 @@ export function toPost(
 	const profile = typeof author?.url === 'string' && author.url !== '' ? author.url : null;
 
 	return buildPost(source, {
+		// Every plugin in the table is driven with no credential at all — `grayjay-plugin-host` is
+		// given no linked account — so a plugin sees exactly what an anonymous visitor to that
+		// platform sees. If one is ever handed a credential, this stops being true and has to come
+		// from the item rather than from here.
+		visibility: 'public',
+
 		// The plugin's own id where it has one, falling back to the url — which is unique per item
 		// and stable, and is what the id is for.
 		id: typeof id === 'string' && id !== '' ? id : url,

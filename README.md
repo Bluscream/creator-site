@@ -133,6 +133,44 @@ There is exactly **one** in the project, and it should stay that way. `src/app.d
 `App` **namespace** and there is no module form of that declaration. It names the rule, covers one
 line, and carries its reason above it. Any other suppression should be argued for in review.
 
+## Two deployment postures, and the one invariant they create
+
+This install has to make sense for **two different people**, and the difference between them is who
+holds the credentials:
+
+|                            | the creator's own site                                     | a fan's site for a creator               |
+| -------------------------- | ---------------------------------------------------------- | ---------------------------------------- |
+| platform accounts          | linked, so private data is reachable                       | none                                     |
+| what the backend can see   | analytics, unlisted and scheduled content, follower detail | whatever is public                       |
+| what the public site shows | only what the creator chooses to publish                   | the same public material, and less of it |
+
+The posture is deliberately **not a setting**. A fan's install is safe because it holds no secret,
+not because a flag says `public_only` — a flag is something a bug or an operator can flip, and the
+absence of a credential is not.
+
+What it does create is one invariant, and it is worth stating plainly because the mistake is so
+easy: **do not leak unlisted content into the feed.** A credentialed read of "this channel's
+uploads" returns the unlisted and scheduled ones, because that is what the credential is for, and
+nothing about the shape of a feed row stops them being rendered. So:
+
+- Every `ContentPiece` carries a **`visibility`**, and the field is **required with no default**.
+  A default would be wrong in one direction or the other: `public` means a reader that forgets
+  leaks, and a safer default means the forgetting is silent too. Required means the compiler asks
+  every reader, including one written years from now.
+- A reader that genuinely cannot tell says `unknown`, which public surfaces do not render — a
+  visible, harmless bug rather than an invisible, harmful one. Each reader that claims `public`
+  does so with a comment saying _why_ it is true, which is usually "this endpoint is read with no
+  credential, or with an app token that grants only public data".
+- `posts()` filters to public **by default**, and the admin has to ask for `audience: 'everything'`
+  by name. A filter that must be requested is a filter somebody will one day not request.
+- The filter is `=== 'public'`, not an exclusion list, so a visibility this build has never heard
+  of — from a newer cache, or a platform tier added later — is not rendered.
+- Filtering happens **before** the cap, so a page of ten is ten public posts rather than three.
+
+`src/lib/server/posts.test.ts` drives this as a scenario — a source returning one of each
+visibility — rather than as a unit test on the filter, because the ordering and the cap are part of
+the claim.
+
 ## Providers: nothing is bound to one vendor
 
 This is software other people install, and **most of them will not have an account with whichever

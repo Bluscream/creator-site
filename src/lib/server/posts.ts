@@ -30,7 +30,13 @@
  */
 
 import { z } from 'zod';
-import { CONTENT_KINDS, MEDIA_KINDS, showable } from '../canonical.js';
+import {
+	CONTENT_KINDS,
+	CONTENT_VISIBILITIES,
+	MEDIA_KINDS,
+	publicOnly,
+	showable
+} from '../canonical.js';
 import { Cache } from './cache.js';
 import type { Parse } from './cache.js';
 import { feedConfig, feedSources } from './feed.js';
@@ -111,7 +117,17 @@ const cachedPosts: Parse<readonly ContentPiece[]> = (value) =>
 				media: z.array(cachedMedia),
 				duration: z.number().nullable(),
 				views: z.number().nullable(),
-				live: z.boolean()
+				live: z.boolean(),
+
+				// `catch` rather than a plain enum, and this is a compatibility decision rather than
+				// leniency. A cache written by a build from before this field existed has no
+				// `visibility` key, and rejecting it would throw away a whole cached page — which, on
+				// the request right after an upgrade, means every source gets refetched at once.
+				//
+				// `unknown` is the right fallback because public surfaces do not render it: a stale
+				// entry is briefly missing from the feed and is back on the next refresh. The other
+				// direction would publish an item nobody has checked.
+				visibility: z.enum(CONTENT_VISIBILITIES).catch('unknown')
 			})
 		)
 		.parse(value);
@@ -258,14 +274,31 @@ function stillShowable(
 }
 
 /**
+ * Who is being served, which decides whether unlisted and private items are included.
+ *
+ * - `public` — only `visibility: 'public'`. The default, and the reason it is the default: the
+ *   project has to support a creator's own install, where the readers hold their credentials and
+ *   a read of "this channel's uploads" comes back with the unlisted ones in it. A public page that
+ *   has to remember to filter is a public page that will one day forget.
+ * - `everything` — every piece, for the admin. Has to be asked for by name.
+ */
+export type Audience = 'public' | 'everything';
+
+/**
  * The merged posts, newest first.
  *
  * @param limit overrides the configured cap. Zero or less means everything there is, which is what
  *   a whole feed *page* wants — there is no narrow column to keep short, and no reason to throw
  *   away posts that have already been fetched and parsed.
+ * @param audience defaults to `public`. See {@link Audience}.
  */
 export async function posts(
-	options: { readonly limit?: number; readonly ttl?: number; readonly cache?: Cache } = {}
+	options: {
+		readonly limit?: number;
+		readonly ttl?: number;
+		readonly cache?: Cache;
+		readonly audience?: Audience;
+	} = {}
 ): Promise<PostsResult> {
 	const config = feedConfig();
 
@@ -304,14 +337,22 @@ export async function posts(
 			kind: source.kind,
 			ok: outcome.reason === null,
 			reason: outcome.reason,
+
+			// What the source returned, before the visibility filter. The per-source report is a
+			// diagnostic — "did this source answer" — and a count that moved because four items were
+			// unlisted would read as the source having returned less than it did.
 			count: outcome.posts.length,
 			age: outcome.age
 		});
 	}
 
+	// Filtered before the cap, not after: filtering afterwards would leave a page of ten holding
+	// three items because seven unlisted ones took the slots.
+	const visible = (options.audience ?? 'public') === 'everything' ? merged : publicOnly(merged);
+
 	return {
 		available: true,
-		posts: capped(sorted(merged), cap),
+		posts: capped(sorted(visible), cap),
 		sources: report,
 		age: oldest,
 		// Stale when anything is being served from beyond its refresh interval — the throttled

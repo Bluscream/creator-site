@@ -13,7 +13,7 @@ import { platformFor } from '../../platforms.js';
 import type { ContentPiece } from '../../posts.js';
 import type { FeedSourceConfig } from '../feed-config.js';
 import { actorFrom, idFrom, instantFrom } from '../../canonical.js';
-import type { ContentKind } from '../../canonical.js';
+import type { ContentKind, ContentVisibility } from '../../canonical.js';
 import type { PostSourceKind } from './posts-kinds.js';
 
 /** Trimmed to this before being stored, so a whole blog post does not land in the cache. */
@@ -155,6 +155,20 @@ export interface RawPost {
 
 	/** Whether it is happening right now. Absent means it is not. */
 	readonly live?: boolean | undefined;
+
+	/**
+	 * Who this is for. See {@link ContentVisibility}.
+	 *
+	 * **Required**, unlike every other field here, and deliberately the only one. A provider that
+	 * reads a public endpoint says `'public'` and should have to think about whether that is true;
+	 * one reading with the creator's own credential gets the unlisted and scheduled items back and
+	 * has to say so, or the public feed renders them.
+	 *
+	 * An optional field with a safe default would have been easier and would not work: the next
+	 * provider is written by copying the last one, and a field nobody has to fill in is a field that
+	 * stays at its default long after that default stopped being right.
+	 */
+	readonly visibility: ContentVisibility;
 }
 
 /**
@@ -186,6 +200,7 @@ export function buildPost(source: ResolvedSource, raw: RawPost): ContentPiece | 
 		duration: count(raw.duration),
 		views: count(raw.views),
 		live: raw.live === true,
+		visibility: raw.visibility,
 		media:
 			picture === null
 				? []

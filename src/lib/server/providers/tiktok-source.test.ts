@@ -151,6 +151,10 @@ describe('reading an account’s videos', () => {
 			duration: null,
 			views: 3464,
 			live: false,
+			// Asserted, not incidental: this is the provider's claim that what it read is public —
+			// the public profile payload holds no private or friends-only video. A reader that
+			// starts using a credential has to change this line, which is the point of it being here.
+			visibility: 'public',
 			author: { name: 'Someone', profileUrl: 'https://www.tiktok.com/@someone' }
 		});
 	});

@@ -268,7 +268,11 @@ describe('reading a channel', () => {
 			// were being thrown away.
 			duration: 11_313,
 			views: 1863,
-			live: false
+			live: false,
+			// Asserted, not incidental: this is the provider's claim that what it read is public —
+			// an app token grants only what is public, so no private VOD is in the response. A reader that
+			// starts using a credential has to change this line, which is the point of it being here.
+			visibility: 'public'
 		});
 	});
 

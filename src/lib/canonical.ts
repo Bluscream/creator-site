@@ -226,6 +226,28 @@ export const CONTENT_KINDS = [
 export type ContentKind = (typeof CONTENT_KINDS)[number];
 
 /**
+ * Who a piece of content is for.
+ *
+ * This exists because of the two deployment postures the project has to support. On a creator's own
+ * install the platform accounts are linked, so a read of "this channel's uploads" comes back with
+ * the unlisted and scheduled ones in it — that is what the credential is *for*. Nothing about the
+ * shape of a feed row stops those being rendered on the public page, so something has to carry the
+ * distinction, and it has to be carried per item rather than per source: one channel holds both.
+ *
+ * The values are the useful distinctions rather than every platform's vocabulary:
+ *
+ * - `public` — anybody can find it. The only value a public surface renders.
+ * - `unlisted` — reachable with the link, not listed. Published, and deliberately not announced:
+ *   putting it in a feed is precisely the mistake this type exists to prevent.
+ * - `private` — only the owner. Drafts, scheduled items, members-only material.
+ * - `unknown` — the reader did not say.
+ */
+export const CONTENT_VISIBILITIES = ['public', 'unlisted', 'private', 'unknown'] as const;
+
+/** One of {@link CONTENT_VISIBILITIES}. */
+export type ContentVisibility = (typeof CONTENT_VISIBILITIES)[number];
+
+/**
  * A piece of content: a post, a video, a VOD, a clip, an article.
  *
  * One type for all of them, because a feed row draws the same things in the same places whichever it
@@ -291,6 +313,21 @@ export interface ContentPiece extends Entity {
 	 * reader returns both. A renderer uses this for the badge that makes somebody click.
 	 */
 	readonly live: boolean;
+
+	/**
+	 * Who it is for. See {@link CONTENT_VISIBILITIES}.
+	 *
+	 * **Required, with no default**, and that is the whole design. A default would be wrong in one
+	 * direction or the other: `public` means a credentialed reader that forgets this field leaks
+	 * unlisted content, and any safer default means the forgetting is silent too — it would just
+	 * fail the other way. Required means the compiler asks every reader, including one written
+	 * years from now by somebody who never read this comment.
+	 *
+	 * A reader that genuinely cannot tell says `unknown`, which public surfaces do not render. That
+	 * is a visible, harmless bug — an item missing from a feed — rather than an invisible, harmful
+	 * one.
+	 */
+	readonly visibility: ContentVisibility;
 }
 
 /**
@@ -446,6 +483,21 @@ export function pictureOf(piece: { readonly media: readonly Media[] }): Media | 
 /** Whether a piece of media has stopped working. */
 export function expired(media: Media, at: number = Math.floor(Date.now() / 1000)): boolean {
 	return media.expiresAt !== undefined && media.expiresAt <= at;
+}
+
+/**
+ * The pieces a public surface may render.
+ *
+ * `=== 'public'` rather than excluding a list of bad values, and the difference is the point: a
+ * visibility this build has never heard of — from a cache written by a newer version, or a
+ * platform tier added later — is not rendered. An exclusion list would render it, because it would
+ * not be on the list.
+ *
+ * Applied by {@link module:server/posts} for every caller that does not explicitly ask for
+ * everything, so a public page added later is filtered by default rather than by remembering.
+ */
+export function publicOnly(pieces: readonly ContentPiece[]): readonly ContentPiece[] {
+	return pieces.filter((piece) => piece.visibility === 'public');
 }
 
 /**

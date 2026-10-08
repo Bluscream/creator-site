@@ -316,6 +316,12 @@ function toPost(
 	if (id === undefined || id === '') return null;
 
 	return buildPost(source, {
+		// Helix, with an *app* access token rather than a user one. That distinction is the whole
+		// claim: an app token grants only what is public, so a VOD set to private or a
+		// subscriber-only video is not in the response. A user token for the broadcaster would
+		// return those, and this would have to be read from each entry instead.
+		visibility: 'public',
+
 		// Prefixed by kind, because a video and a clip can hold the same numeric id.
 		id: `${kind}-${id}`,
 		// "VOD" and "clip" are words a viewer understands; "post" is what neither of them is. One

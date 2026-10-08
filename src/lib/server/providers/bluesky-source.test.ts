@@ -100,7 +100,11 @@ describe('reading an author feed', () => {
 			// A Bluesky post has no length and no public view count.
 			duration: null,
 			views: null,
-			live: false
+			live: false,
+			// Asserted, not incidental: this is the provider's claim that what it read is public —
+			// an unauthenticated AppView read cannot see an unpublished post. A reader that
+			// starts using a credential has to change this line, which is the point of it being here.
+			visibility: 'public'
 		});
 	});
 

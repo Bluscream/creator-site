@@ -99,8 +99,13 @@ function backdate(seconds: number) {
 	}
 }
 
-/** A post from a source, at a given time. */
-function post(source: string, id: string, at: string): ContentPiece {
+/** A post from a source, at a given time, public unless a case says otherwise. */
+function post(
+	source: string,
+	id: string,
+	at: string,
+	visibility: ContentPiece['visibility'] = 'public'
+): ContentPiece {
 	return {
 		id: `${source}:${id}`,
 		source,
@@ -114,7 +119,8 @@ function post(source: string, id: string, at: string): ContentPiece {
 		media: [],
 		duration: null,
 		views: null,
-		live: false
+		live: false,
+		visibility
 	};
 }
 
@@ -158,6 +164,109 @@ describe('with nothing configured', () => {
 		const { posts } = await freshPosts();
 
 		expect((await posts({ cache })).available).toBe(false);
+	});
+});
+
+/**
+ * What reaches a public page, and what does not.
+ *
+ * This is the invariant behind the whole `visibility` field, and it is worth stating as a scenario
+ * rather than as a unit test on the filter: on a creator's own install the readers hold their
+ * credentials, so a read of "this channel's uploads" comes back with the unlisted and scheduled
+ * items in it. That is what the credential is for. Nothing about the shape of a feed row stops
+ * those being rendered, so this is the thing that has to.
+ */
+describe('a source that returns more than the public may see', () => {
+	beforeEach(() => {
+		configure([{ id: 'a', kind: 'feed', url: 'https://a.test/f' }]);
+		behaviour.set('feed', () =>
+			Promise.resolve([
+				post('a', 'public', '2026-10-04T00:00:00.000Z'),
+				post('a', 'unlisted', '2026-10-03T00:00:00.000Z', 'unlisted'),
+				post('a', 'private', '2026-10-02T00:00:00.000Z', 'private'),
+				post('a', 'unknown', '2026-10-01T00:00:00.000Z', 'unknown')
+			])
+		);
+	});
+
+	it('serves only the public one by default', async () => {
+		// By default, with no option passed, because that is the case a page added later will be. A
+		// filter that has to be asked for is a filter somebody will not ask for.
+		const { posts } = await freshPosts();
+
+		expect((await posts({ cache })).posts.map((piece) => piece.id)).toStrictEqual(['a:public']);
+	});
+
+	it('serves all of them when the admin asks by name', async () => {
+		const { posts } = await freshPosts();
+		const result = await posts({ cache, audience: 'everything' });
+
+		expect(result.posts.map((piece) => piece.id)).toStrictEqual([
+			'a:public',
+			'a:unlisted',
+			'a:private',
+			'a:unknown'
+		]);
+	});
+
+	it('hides an unlisted post even when it is the newest thing there is', async () => {
+		// The ordering case, because "newest first" and "public only" are two steps and the wrong
+		// order between them puts an unlisted item at the top of the page.
+		behaviour.set('feed', () =>
+			Promise.resolve([
+				post('a', 'unlisted', '2026-10-09T00:00:00.000Z', 'unlisted'),
+				post('a', 'public', '2026-10-01T00:00:00.000Z')
+			])
+		);
+
+		const { posts } = await freshPosts();
+
+		expect((await posts({ cache })).posts.map((piece) => piece.id)).toStrictEqual(['a:public']);
+	});
+
+	it('fills the page with public posts rather than counting the hidden ones against it', async () => {
+		// Filtered before the cap, not after. Capping first would leave a page of two holding one
+		// item because an unlisted post took the other slot.
+		behaviour.set('feed', () =>
+			Promise.resolve([
+				post('a', 'unlisted', '2026-10-09T00:00:00.000Z', 'unlisted'),
+				post('a', 'first', '2026-10-08T00:00:00.000Z'),
+				post('a', 'second', '2026-10-07T00:00:00.000Z')
+			])
+		);
+
+		const { posts } = await freshPosts();
+
+		expect((await posts({ cache, limit: 2 })).posts.map((piece) => piece.id)).toStrictEqual([
+			'a:first',
+			'a:second'
+		]);
+	});
+
+	it('still reports what the source returned, not what was shown', async () => {
+		// The per-source report is a diagnostic — "did this source answer" — so a count that moved
+		// because three items were hidden would read as the source having returned less than it did.
+		const { posts } = await freshPosts();
+
+		expect((await posts({ cache })).sources[0]).toMatchObject({ ok: true, count: 4 });
+	});
+
+	it('does not render a visibility it has never heard of', async () => {
+		// A cache written by a newer build, or a platform tier added later. `=== 'public'` rather
+		// than an exclusion list is what makes this hold: a list would not have the new value on it
+		// and would therefore render it.
+		behaviour.set('feed', () =>
+			Promise.resolve([
+				{
+					...post('a', 'from-the-future', '2026-10-01T00:00:00.000Z'),
+					visibility: 'subscribers-only' as unknown as ContentPiece['visibility']
+				}
+			])
+		);
+
+		const { posts } = await freshPosts();
+
+		expect((await posts({ cache })).posts).toStrictEqual([]);
 	});
 });
 

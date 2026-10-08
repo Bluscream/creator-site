@@ -354,6 +354,10 @@ function toPost(
 	const profile = `https://www.tiktok.com/@${encodeURIComponent(owner)}`;
 
 	return buildPost(source, {
+		// From the public profile payload, unauthenticated. TikTok has private and friends-only
+		// videos, and none of them appear in what an anonymous request returns — which is the
+		// reason this is sound and would not be if a session cookie were ever added.
+		visibility: 'public',
 		id,
 		kind: 'video',
 		url: `${profile}/video/${encodeURIComponent(id)}`,

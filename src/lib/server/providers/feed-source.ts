@@ -184,6 +184,22 @@ function entriesOf(
 }
 
 /**
+ * What a syndicated item's visibility is, and why one answer covers all four formats.
+ *
+ * A feed document is something a publisher chose to publish, and every item in it is as reachable
+ * as the document is — there is no per-item visibility in RSS, Atom, RDF or JSON Feed to read even
+ * if one wanted to. YouTube's channel feed, which is the main consumer here, lists public uploads
+ * and nothing else.
+ *
+ * **The caveat worth stating**, because it is the one way this becomes wrong: an operator can point
+ * a feed source at a *private* feed url — a tokened or signed one some platforms offer — and its
+ * items would be marked public here on the strength of a reason that no longer holds. Nothing in
+ * the format distinguishes the two, so if that ever becomes a supported thing to configure, it has
+ * to be answered by the source's configuration rather than by this constant.
+ */
+const FEED_VISIBILITY = 'public' as const;
+
+/**
  * One mapper per format.
  *
  * Four branches rather than one over a union, because the item types genuinely differ: an RSS item
@@ -194,6 +210,7 @@ function entriesOf(
 function rawOf(parsed: ReturnType<typeof parseFeed>): readonly RawPost[] {
 	if (parsed.format === 'atom') {
 		return (parsed.feed.entries ?? []).map((entry) => ({
+			visibility: FEED_VISIBILITY,
 			// Atom requires an id, but a bridge-manufactured feed often omits it, so the link is the
 			// fallback — it is what makes a post unique anyway.
 			id: entry.id ?? alternateOf(entry.links) ?? '',
@@ -218,6 +235,7 @@ function rawOf(parsed: ReturnType<typeof parseFeed>): readonly RawPost[] {
 
 	if (parsed.format === 'json') {
 		return (parsed.feed.items ?? []).map((item) => ({
+			visibility: FEED_VISIBILITY,
 			id: item.id ?? item.url ?? '',
 			url: item.url,
 			title: item.title,
@@ -230,6 +248,7 @@ function rawOf(parsed: ReturnType<typeof parseFeed>): readonly RawPost[] {
 
 	if (parsed.format === 'rdf') {
 		return (parsed.feed.items ?? []).map((item) => ({
+			visibility: FEED_VISIBILITY,
 			// RDF has no guid. `rdf:about` is the resource's identifier and is what it has instead.
 			id: item.rdf?.about ?? item.link ?? '',
 			url: item.link,
@@ -244,6 +263,7 @@ function rawOf(parsed: ReturnType<typeof parseFeed>): readonly RawPost[] {
 	}
 
 	return (parsed.feed.items ?? []).map((item) => ({
+		visibility: FEED_VISIBILITY,
 		// A `guid` is the id when there is one; plenty of feeds have none, and then the link
 		// identifies the post.
 		id: item.guid?.value ?? item.link ?? '',
