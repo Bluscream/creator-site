@@ -814,7 +814,8 @@ messages/                    translation catalogues, one file per locale (en, de
 <DATA_DIR>/config/           the creator's configuration documents — not in the repository
 ```
 
-Tests sit beside what they test: `*.test.ts` for Vitest, `*.e2e.ts` for Playwright.
+Tests sit beside what they test: `*.test.ts` for Vitest in Node, `*.svelte.test.ts` for a component
+rendered in a real browser, and `*.e2e.ts` for Playwright against the built app.
 
 `src/lib/server/` is load-bearing rather than a convention: anything touching the filesystem, a
 lock or a credential goes there, so an accidental client import is a build error rather than a leak.
