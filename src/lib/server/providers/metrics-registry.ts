@@ -10,29 +10,37 @@
  * a plan whenever a kind is added: a kind that *gains* a reader has to leave the planned table, and
  * a total type forbids that. The partition test asks the question instead, in both directions.
  *
- * ### Why only Bluesky is read today
+ * ### What is read today, and why the rest is not
  *
- * Because it is the only one that can be. Every other platform's numbers need a credential this
- * install does not have yet — there is no public endpoint on any of them giving a follower count or
- * a view total to an anonymous caller — and the linked-accounts work that would supply one is a
- * later stage. Bluesky serves `app.bsky.actor.getProfile` unauthenticated, which also makes it the
- * one reader that works on a *fan's* install.
+ * Everything that can be read without a credential is read. Bluesky serves
+ * `app.bsky.actor.getProfile` unauthenticated; and every platform behind a GrayJay plugin answers
+ * `getChannel` with a subscriber count, which covers `kick` and the nine platforms in the `grayjay`
+ * table. Both also work on a *fan's* install, which holds no credentials at all — that is the
+ * reason to prefer them over a linked-account reader even once one exists.
  *
- * So the honest state for the rest is "configurable, with a stated plan", in a sentence an admin
- * can read. The page is not thin in the meantime, because the orchestrator also *derives* what it
- * can from content the install has already fetched — see `../metrics.ts`. Derived numbers are
- * labelled as derived rather than presented as the platform's own, which is the difference between
- * a page that is honestly partial and one that is quietly wrong.
+ * What is left needs a credential. `youtube`, `twitch` and `tiktok` publish no follower count or
+ * view total to an anonymous caller — Twitch's `/channels/followers` wants a broadcaster token and
+ * `/users` stopped returning a view count — and `feed` carries no performance data at all, because
+ * a syndication document is a list of posts and nothing else.
+ *
+ * So the honest state for those is "configurable, with a stated plan", in a sentence an admin can
+ * read. The page is not thin in the meantime, because the orchestrator also *derives* what it can
+ * from content the install has already fetched — see `../metrics.ts`. Derived numbers are labelled
+ * as derived rather than presented as the platform's own, which is the difference between a page
+ * that is honestly partial and one that is quietly wrong.
  */
 
 import { blueskyMetricsProvider } from './bluesky-metrics.js';
+import { grayjayMetricsProvider, kickMetricsProvider } from './grayjay-metrics.js';
 import { POST_SOURCE_KINDS } from './posts-kinds.js';
 import type { PostSourceKind } from './posts-kinds.js';
 import type { MetricsSourceProvider } from './metrics-source.js';
 
 /** The kinds whose numbers can actually be read, and what reads them. */
 const READERS: Readonly<Partial<Record<PostSourceKind, MetricsSourceProvider>>> = {
-	bluesky: blueskyMetricsProvider
+	bluesky: blueskyMetricsProvider,
+	kick: kickMetricsProvider,
+	grayjay: grayjayMetricsProvider
 };
 
 /**
@@ -43,13 +51,10 @@ const READERS: Readonly<Partial<Record<PostSourceKind, MetricsSourceProvider>>> 
  * and "needs the YouTube Analytics API, which needs the channel linked" is.
  */
 const PLANNED: Readonly<Partial<Record<PostSourceKind, string>>> = {
-	feed: 'nothing — a syndication feed carries no performance data, so this kind will always be derived only',
+	feed: 'nothing — a syndication document is a list of posts and carries no performance data, so this kind is derived-only for good',
 	youtube: 'the YouTube Analytics API, once the channel is linked',
 	twitch: 'Twitch’s API with the broadcaster’s own token, once the channel is linked',
-	tiktok: 'TikTok’s creator API, once the account is linked',
-	kick: 'Kick’s API with the channel owner’s token, once the channel is linked',
-	grayjay:
-		'nothing — the plugins are driven without credentials, so this kind will always be derived only'
+	tiktok: 'TikTok’s creator API, once the account is linked'
 };
 
 /**

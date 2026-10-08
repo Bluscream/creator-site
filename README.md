@@ -177,14 +177,14 @@ This is software other people install, and **most of them will not have an accou
 service this developer uses.** So every capability that reaches a visitor is an interface, and the
 service behind it is a deployment's choice.
 
-| capability | implementations that exist or are planned                                              |
-| ---------- | -------------------------------------------------------------------------------------- |
-| `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast                  |
-| `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat                           |
-| `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall               |
-| `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver                             |
-| `posts`    | **configured sources** (below) · an aggregator such as Phyllo or Juicer                |
-| `metrics`  | **Bluesky's public profile** · each platform's analytics API · a third-party collector |
+| capability | implementations that exist or are planned                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast                                                        |
+| `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat                                                                 |
+| `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall                                                     |
+| `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver                                                                   |
+| `posts`    | **configured sources** (below) · an aggregator such as Phyllo or Juicer                                                      |
+| `metrics`  | **Bluesky's public profile** · **GrayJay plugins' channel counts** · each platform's analytics API · a third-party collector |
 
 ### Posts and metrics are the exception: a second seam, by source kind
 
@@ -746,11 +746,28 @@ Four things it refuses to get wrong:
   platforms is two followers in a sum, and that is a number a creator might repeat in a sponsorship
   conversation.
 
-Today **Bluesky** is the only platform read for real: `app.bsky.actor.getProfile` is served
-unauthenticated, which also makes it the one reader that works on a fan's install. Every other kind
-is in the registry's planned table with a sentence saying what it is waiting for — usually the
-creator's account being linked — rather than being absent, because a configured source silently
-missing from this page looks exactly like a platform with nothing to report.
+Everything that can be read without a credential is read today, which is **eleven platforms**:
+
+- **Bluesky**, from `app.bsky.actor.getProfile` — followers and an all-time post count.
+- **Kick and the nine platforms behind GrayJay plugins** (Dailymotion, Odysee, SoundCloud, Nebula,
+  Bitchute, PeerTube, Niconico, media.ccc.de), whose `getChannel` returns a subscriber count. One
+  provider covers all of them, because they go through one plugin host.
+
+Both work on a _fan's_ install, which holds no credentials at all — which is the reason to prefer
+them over a linked-account reader even once one exists.
+
+What is left needs a credential. YouTube, Twitch and TikTok publish no follower count or view total
+to an anonymous caller (Twitch's `/channels/followers` wants a broadcaster token and `/users`
+stopped returning a view count), and a syndication feed carries no performance data at all. Those
+sit in the registry's planned table with a sentence saying what each is waiting for, rather than
+being absent — because a configured source silently missing from this page looks exactly like a
+platform with nothing to report.
+
+`RUN_LIVE=1` is what proves any of it. The offline tests check routing and the handling of a count
+that is not one; only a real plugin answering a real request shows that the premise holds. That is
+also where a real bug turned up: the plugins answer `null` for a channel they cannot resolve, which
+was being read as "no count published" — so a typo in a channel url would have left an empty
+platform block on the page forever with nothing saying why.
 
 ## Backup and restore: one file, and nothing half-applied
 

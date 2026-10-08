@@ -39,7 +39,15 @@ const MANIFEST = 'https://plugins.grayjay.app/Kick/KickConfig.json';
  */
 const HANDLE = /^[A-Za-z0-9_]{2,30}$/;
 
-const ADVICE = 'Set this source to a Kick channel, for example `kick.com/xqc` or just `xqc`.';
+/**
+ * Exported so `grayjay-metrics.ts` says the same thing.
+ *
+ * Two copies of a sentence an admin reads is two sentences that drift: one of them gains an example
+ * and the other does not, and which one somebody sees depends on whether they were looking at the
+ * feed or the numbers.
+ */
+export const ADVICE =
+	'Set this source to a Kick channel, for example `kick.com/xqc` or just `xqc`.';
 
 // Re-exported because they are read here and tested here, and because a caller reaching for them
 // from this module rather than the shared one is reading the right file for Kick.
