@@ -111,6 +111,13 @@ export function hardcodedStrings(file: string, source: string): readonly Hardcod
  * something ever does it will have to be exempted explicitly, which is the right outcome: a
  * catalogue whose keys are assembled at runtime cannot be checked by anything.
  *
+ * The other cost is that this reads whole files, comments included — so a call shape written in
+ * prose counts as a reference, and a made-up key in an explanatory comment is reported as a
+ * reference the catalogue lacks. That has happened once. It is left this way on purpose: the
+ * alternative is stripping comments with a second regex, which would have to get strings containing
+ * `//` right to avoid hiding real calls. A check of this kind should fail loudly and wrongly rather
+ * than quietly and plausibly, so describe a key instead of writing one.
+ *
  * The other cost was worse and is now checked separately: a file importing the catalogue under any
  * other name — `import * as paraglide from …` — had every one of its calls invisible here, so the
  * keys it used were reported as dead and the keys it *missed* were reported as covered. See

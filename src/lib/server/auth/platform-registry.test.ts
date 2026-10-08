@@ -20,11 +20,15 @@ const env = vi.hoisted(() => {
 		secret: string | undefined;
 		twitchId: string | undefined;
 		twitchSecret: string | undefined;
+		kickId: string | undefined;
+		kickSecret: string | undefined;
 	} = {
 		id: 'client-id',
 		secret: 'client-secret',
 		twitchId: undefined,
-		twitchSecret: undefined
+		twitchSecret: undefined,
+		kickId: undefined,
+		kickSecret: undefined
 	};
 
 	return state;
@@ -45,6 +49,17 @@ vi.mock('$app/env/private', () => ({
 	},
 	get TWITCH_CLIENT_SECRET() {
 		return env.twitchSecret;
+	},
+
+	// Left undefined rather than omitted. An omitted export is a module-load error — "no
+	// KICK_CLIENT_ID export is defined on the mock" — which is what adding Kick produced here, and
+	// it reads like a bug in the mock rather than what it is: a new platform this file has not
+	// decided what to do about. Undefined is the decision, and it means "not configured".
+	get KICK_CLIENT_ID() {
+		return env.kickId;
+	},
+	get KICK_CLIENT_SECRET() {
+		return env.kickSecret;
 	}
 }));
 
@@ -305,6 +320,73 @@ describe('linkable', () => {
 			expect(linkable(firstPlatform())).toBe(false);
 		} finally {
 			configured('client-id', 'client-secret');
+		}
+	});
+});
+
+describe('a platform whose readers are not written yet', () => {
+	/** Kick configured as well as Discord, put back afterwards — as `withTwitch` above. */
+	function withKick(body: () => void): void {
+		env.kickId = 'kick-client-id';
+		env.kickSecret = 'kick-client-secret';
+
+		try {
+			body();
+		} finally {
+			env.kickId = undefined;
+			env.kickSecret = undefined;
+		}
+	}
+
+	it('can be linked', () => {
+		withKick(() => {
+			expect(offeredMethods(platformNamed('kick'))).toEqual(['oauth']);
+		});
+	});
+
+	it('claims only what it can actually do', () => {
+		// The property this exists for. Kick's API could answer posts and live, but nothing here reads
+		// them, and a capability on this list is a promise the account page makes. One that leads
+		// nowhere tells a creator their content will appear and then it does not — which is worse than
+		// a capability that is plainly absent.
+		withKick(() => {
+			const kick = platformNamed('kick');
+
+			expect(kick.capabilities).toEqual(['sign-in', 'social']);
+			expect(supports(kick, 'posts')).toBe(false);
+			expect(supports(kick, 'live')).toBe(false);
+			expect(supports(kick, 'chat')).toBe(false);
+		});
+	});
+
+	it('says out loud what it cannot do', () => {
+		// Because the obvious reason to link Kick is the one thing the link does not yet do, and a
+		// creator should learn that on the page rather than from a feed that stays empty.
+		withKick(() => {
+			const { caveat } = platformNamed('kick');
+
+			expect(caveat).not.toBeNull();
+			expect(caveat?.()).toMatch(/not implemented yet/);
+		});
+	});
+
+	it('offers no paste-a-token field, because Kick mints no such token', () => {
+		// Twitch offers one because its CLI produces a user token for your own application. Every
+		// "get a Kick token" page is somebody else's application asking for scopes on the creator's
+		// account, which is the thing the method exists to avoid.
+		withKick(() => {
+			expect(platformNamed('kick').methods).toEqual(['oauth']);
+			expect(platformNamed('kick').token).toBeNull();
+		});
+	});
+
+	it('is not linkable when only half of it is configured', () => {
+		env.kickId = 'kick-client-id';
+
+		try {
+			expect(linkablePlatforms().map((entry) => entry.id)).not.toContain('kick');
+		} finally {
+			env.kickId = undefined;
 		}
 	});
 });

@@ -46,6 +46,17 @@ vi.mock('$app/env/private', () => ({
 	},
 	get TWITCH_CLIENT_SECRET() {
 		return env.twitchSecret;
+	},
+
+	// Left undefined rather than omitted. An omitted export is a module-load error — "no
+	// KICK_CLIENT_ID export is defined on the mock" — which is what adding Kick produced here, and
+	// it reads like a bug in the mock rather than what it is: a new platform this file has not
+	// decided what to do about. Undefined is the decision, and it means "not configured".
+	get KICK_CLIENT_ID() {
+		return undefined;
+	},
+	get KICK_CLIENT_SECRET() {
+		return undefined;
 	}
 }));
 

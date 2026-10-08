@@ -98,8 +98,27 @@ export interface AccountPlatform {
 	 * For the honest cases the research turned up — X can be linked and its identity read, but the
 	 * free tier cannot read the creator's own timeline. Surfacing that in the admin is the difference
 	 * between a documented limitation and a feed that looks broken.
+	 *
+	 * ### A function, so it cannot be an untranslated string
+	 *
+	 * This was `string | null`, which is the one field on this interface a platform renders verbatim
+	 * — and a plain string here is an English sentence on a German page. The project's first rule is
+	 * that every visible string goes through a message function, but the check that enforces it parses
+	 * markup, and a platform module is TypeScript: the string would have been invisible to it forever.
+	 *
+	 * So the type asks for a thunk, which in practice calls a message function — see
+	 * `./kick-platform.ts` for the only one that has a caveat today. That puts the sentence in the
+	 * catalogue where a translator can reach it, and makes the key visible to the dead-key scan, which
+	 * already reads `.ts`. The alternative, a key the page looks up dynamically, would defeat both:
+	 * a computed `m[name]()` is exactly the shape that scan cannot see.
+	 *
+	 * (Deliberately described rather than demonstrated: that scan is a regex over whole files, so a
+	 * call written in prose here would be reported as a reference to a key the catalogue lacks. It
+	 * fails loudly when that happens, which is the right way round for this kind of check.)
+	 *
+	 * Called where the locale is known, which is the load function rather than this module.
 	 */
-	readonly caveat: string | null;
+	readonly caveat: (() => string) | null;
 
 	/**
 	 * How it can be linked, in the order the account page should offer them.

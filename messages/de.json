@@ -14,6 +14,7 @@
 	"admin_end_others_none": "Das ist deine einzige Sitzung.",
 	"admin_end_session": "Beenden",
 	"admin_failed": "Das hat nicht funktioniert.",
+	"admin_kick_caveat": "Ein verknüpftes Kick-Konto belegt, wer du bist, und wird öffentlich angezeigt. Deine Kick-Videos und dein Livestatus werden noch nicht gelesen.",
 	"admin_lead": "Von hier aus wird die Website betrieben.",
 	"admin_link_account": "{platform} verknüpfen",
 	"admin_link_token": "Stattdessen mit einem Token verknüpfen",

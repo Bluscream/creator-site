@@ -72,7 +72,9 @@ export const load: PageServerLoad = ({ cookies, locals, url }) => {
 			id: entry.id,
 			label: entry.label,
 			capabilities: entry.capabilities,
-			caveat: entry.caveat,
+			// Resolved here, where the request's locale is known, so the page receives a sentence
+			// rather than a function it could not serialise.
+			caveat: entry.caveat === null ? null : entry.caveat(),
 			methods: offeredMethods(entry),
 
 			// What to paste and where to get it, for the platforms that take a token. Null rather than

@@ -211,5 +211,22 @@ export const variables = defineEnvVars({
 	TWITCH_CLIENT_SECRET: {
 		description: 'Twitch application secret.',
 		schema: z.string().min(1).optional()
+	},
+
+	/**
+	 * The Kick application an account is linked through.
+	 *
+	 * Unlike Twitch's, these are not a feed credential: Kick is OAuth-only on the account page, and
+	 * the token that comes back belongs to the creator rather than to the application. Kick requires
+	 * PKCE, which `auth/oauth2.ts` handles.
+	 */
+	KICK_CLIENT_ID: {
+		description: 'Kick application id, for linking a Kick account.',
+		schema: z.string().min(1).optional()
+	},
+
+	KICK_CLIENT_SECRET: {
+		description: 'Kick application secret.',
+		schema: z.string().min(1).optional()
 	}
 });
