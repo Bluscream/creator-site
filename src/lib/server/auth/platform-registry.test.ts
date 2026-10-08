@@ -60,6 +60,15 @@ vi.mock('$app/env/private', () => ({
 	},
 	get KICK_CLIENT_SECRET() {
 		return env.kickSecret;
+	},
+
+	// Left undefined here. YouTube's own block lives in `sign-in-registry.test.ts`, because what is
+	// interesting about it is that it can be linked and cannot sign anybody in.
+	get YOUTUBE_CLIENT_ID() {
+		return undefined;
+	},
+	get YOUTUBE_CLIENT_SECRET() {
+		return undefined;
 	}
 }));
 

@@ -66,6 +66,7 @@
 	"admin_title": "Admin",
 	"admin_unlink": "Remove",
 	"admin_unlink_last": "This is your only way to sign in, so it cannot be removed.",
+	"admin_youtube_caveat": "Linking YouTube records your channel and shows it publicly. Your videos already appear from YouTube’s public feed, with or without the link.",
 	"auth_claimable": "Nobody administers this site yet, so the first account to sign in becomes its owner.",
 	"auth_sign_in_lead": "Signing in uses an account you already have. This site never sees your password.",
 	"auth_sign_in_title": "Sign in",

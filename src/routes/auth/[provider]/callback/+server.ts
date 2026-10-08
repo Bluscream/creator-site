@@ -16,12 +16,15 @@ import { SIGN_IN_PATH } from '#lib/server/auth/guard.js';
 import { ACCOUNT_PATH } from '#lib/server/auth/flow.js';
 import { completeSignIn } from '#lib/server/auth/flow.js';
 import { SignInFailure } from '#lib/server/auth/sign-in-provider.js';
-import { signInProvider } from '#lib/server/auth/sign-in-registry.js';
+import { linkProvider } from '#lib/server/auth/sign-in-registry.js';
 import { log } from '#lib/server/log.js';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
-	const provider = signInProvider(event.params.provider);
+	// Permissive: the callback cannot know what the flow was for, because the intent is in the signed
+	// cookie that `completeSignIn` reads. It enforces the capability there, which is the only place
+	// that knows both the intent and the platform.
+	const provider = linkProvider(event.params.provider);
 
 	if (provider === null) error(404, 'No such sign-in method.');
 

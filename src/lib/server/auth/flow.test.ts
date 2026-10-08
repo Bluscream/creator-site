@@ -29,6 +29,27 @@ vi.mock('../db/index.js', () => ({
 	closeDb: () => undefined
 }));
 
+/**
+ * Which platforms may sign somebody in.
+ *
+ * Mocked because the providers in this file are stand-ins — `kind: 'stub'` is not a registered
+ * platform, and `completeSignIn` now refuses a `sign-in` or `link` intent for a platform that does
+ * not declare the capability. That check is the point of `signsInOnly` below, so it is controlled
+ * here rather than worked around.
+ */
+const platforms = vi.hoisted(() => {
+	// Both stand-in kinds this file uses, so the default is "these are sign-in platforms" and a test
+	// that cares narrows it.
+	const state: { signIn: string[] } = { signIn: ['stub', 'other'] };
+
+	return state;
+});
+
+vi.mock('./platform-registry.js', () => ({
+	platformsFor: (capability: string) =>
+		capability === 'sign-in' ? platforms.signIn.map((id) => ({ id })) : []
+}));
+
 vi.mock('../log.js', () => ({
 	log: () => ({
 		error: () => undefined,
@@ -911,5 +932,63 @@ describe('the connect intent', () => {
 		forgetKey();
 
 		await expect(connectTrip(granting())).rejects.toThrow(/SECRET_KEY/);
+	});
+});
+
+describe('a platform that can be linked but cannot sign anybody in', () => {
+	/**
+	 * The gap this closes.
+	 *
+	 * `platform.ts` says capabilities and methods are independent lists, but both auth routes used to
+	 * resolve the provider through the sign-in list — so a link-only platform was offered by the
+	 * account page and answered 404 by the route. The routes now resolve permissively, which makes
+	 * this the check that keeps "can be linked" from quietly meaning "can sign you in".
+	 *
+	 * Enforced against the signed cookie rather than a query parameter, because the request controls
+	 * the parameter and not the cookie.
+	 */
+	function withoutSignIn(body: () => Promise<void>): Promise<void> {
+		platforms.signIn = [];
+
+		return body().finally(() => {
+			platforms.signIn = ['stub', 'other'];
+		});
+	}
+
+	it('refuses a sign-in intent', async () => {
+		await withoutSignIn(async () => {
+			const { cookies } = jar();
+			const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+			const state = url.searchParams.get('state') ?? '';
+
+			await expect(
+				completeSignIn(
+					stubProvider(),
+					requestFor(`/auth/stub/callback?code=c&state=${state}`, cookies)
+				)
+			).rejects.toThrow(/cannot be used to sign in/);
+		});
+	});
+
+	it('still allows a connect intent, which is what such a platform is for', async () => {
+		await withoutSignIn(async () => {
+			const { cookies } = jar();
+			const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies), {
+				intent: 'connect',
+				userId: 'somebody'
+			});
+			const state = url.searchParams.get('state') ?? '';
+
+			// Reaches the connect path rather than the refusal above. It fails later, on the database
+			// this file stubs out, which is a different error entirely — what matters is that the
+			// capability check is not what stopped it.
+			const failure = await completeSignIn(
+				stubProvider(),
+				requestFor(`/auth/stub/callback?code=c&state=${state}`, cookies),
+				{ userId: 'somebody', role: 'owner' } as never
+			).catch((cause: unknown) => cause);
+
+			expect(String(failure)).not.toMatch(/cannot be used to sign in/);
+		});
 	});
 });

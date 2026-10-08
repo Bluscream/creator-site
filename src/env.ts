@@ -228,5 +228,21 @@ export const variables = defineEnvVars({
 	KICK_CLIENT_SECRET: {
 		description: 'Kick application secret.',
 		schema: z.string().min(1).optional()
+	},
+
+	/**
+	 * The Google application a YouTube channel is linked through.
+	 *
+	 * Named for YouTube rather than Google because that is the platform: the OAuth is Google's, but
+	 * the identity stored is a YouTube channel id, and this is not a way of signing in.
+	 */
+	YOUTUBE_CLIENT_ID: {
+		description: 'Google application id, for linking a YouTube channel.',
+		schema: z.string().min(1).optional()
+	},
+
+	YOUTUBE_CLIENT_SECRET: {
+		description: 'Google application secret.',
+		schema: z.string().min(1).optional()
 	}
 });

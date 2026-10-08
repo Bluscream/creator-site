@@ -169,9 +169,28 @@ export async function authorizationUrl(
 		readonly redirectUri: string;
 		readonly scopes: readonly string[];
 		readonly verifier?: string | null;
+
+		/**
+		 * Authorization parameters this provider needs that the specification does not define.
+		 *
+		 * Google needs `access_type=offline` or it never issues a refresh token at all, which is the
+		 * kind of thing that is invisible until a link lapses and cannot be renewed. Rather than every
+		 * provider hand-building its own URL and re-deriving the protocol parameters, it passes what is
+		 * its own.
+		 *
+		 * Applied **before** the protocol parameters, so a provider cannot overwrite `state`,
+		 * `client_id`, `redirect_uri`, `response_type` or the PKCE challenge. An `extra` that could
+		 * replace `state` would be a way to disable the check that binds a callback to a browser.
+		 */
+		readonly extra?: Readonly<Record<string, string>>;
 	}
 ): Promise<URL> {
 	const url = new URL(app.authorizationEndpoint);
+
+	// First, so everything below wins. See the note on `extra`.
+	for (const [name, value] of Object.entries(options.extra ?? {})) {
+		url.searchParams.set(name, value);
+	}
 
 	url.searchParams.set('response_type', 'code');
 	url.searchParams.set('client_id', app.clientId);

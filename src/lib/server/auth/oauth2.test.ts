@@ -148,6 +148,49 @@ describe('the authorization URL', () => {
 		expect(url.searchParams.has('code_challenge')).toBe(false);
 	});
 
+	it('carries a provider own parameters', async () => {
+		// Google needs `access_type=offline` or it never issues a refresh token, which stays invisible
+		// until a link lapses and cannot be renewed.
+		const url = await authorizationUrl(BASIC, {
+			state: 's',
+			redirectUri: REDIRECT,
+			scopes: [],
+			extra: { access_type: 'offline', prompt: 'consent' }
+		});
+
+		expect(url.searchParams.get('access_type')).toBe('offline');
+		expect(url.searchParams.get('prompt')).toBe('consent');
+	});
+
+	it('will not let a provider overwrite the protocol parameters', async () => {
+		// The one that matters. An `extra` that could replace `state` would be a way to switch off the
+		// check that binds a callback to this browser, and one that could replace `redirect_uri` would
+		// point the code somewhere else.
+		const url = await authorizationUrl(BASIC, {
+			state: 'the-real-state',
+			redirectUri: REDIRECT,
+			scopes: ['a'],
+			verifier: codeVerifier(),
+			extra: {
+				state: 'injected',
+				client_id: 'injected',
+				redirect_uri: 'https://evil.invalid/cb',
+				response_type: 'token',
+				code_challenge: 'injected',
+				code_challenge_method: 'plain',
+				scope: 'injected'
+			}
+		});
+
+		expect(url.searchParams.get('state')).toBe('the-real-state');
+		expect(url.searchParams.get('client_id')).toBe('a-client-id');
+		expect(url.searchParams.get('redirect_uri')).toBe(REDIRECT);
+		expect(url.searchParams.get('response_type')).toBe('code');
+		expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+		expect(url.searchParams.get('code_challenge')).not.toBe('injected');
+		expect(url.searchParams.get('scope')).toBe('a');
+	});
+
 	it('generates a different state every time', () => {
 		expect(new Set(Array.from({ length: 50 }, () => oauthState())).size).toBe(50);
 	});

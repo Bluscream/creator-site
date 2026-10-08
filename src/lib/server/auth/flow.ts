@@ -35,6 +35,7 @@
  */
 
 import { oauthState } from './oauth2.js';
+import { platformsFor } from './platform-registry.js';
 import type { Cookies } from '@sveltejs/kit';
 import { DISCORD_REDIRECT_URI } from '$app/env/private';
 import { linkIdentity, signIn } from '../accounts.js';
@@ -234,6 +235,16 @@ export async function completeSignIn(
 	// session.
 	if (pending.kind !== provider.kind || !sameToken(pending.state, state)) {
 		throw new SignInFailure('That sign-in could not be verified. Please start again.');
+	}
+
+	// Enforced here because this is the only place that knows both halves: the intent comes from the
+	// signed cookie, and the capability from the registry. The routes resolve a provider permissively
+	// so that a link-only platform is reachable at all — see `linkProvider` — which makes this the
+	// check that keeps "can be linked" from quietly meaning "can sign you in".
+	if (pending.intent !== 'connect' && !signsIn(provider.kind)) {
+		log().warn({ provider: provider.kind, intent: pending.intent }, 'sign-in refused');
+
+		throw new SignInFailure('That account cannot be used to sign in here.');
 	}
 
 	const redirectUri = redirectUriFor(provider.kind, event.url);
@@ -489,4 +500,15 @@ function parsePending(raw: string): Pending | null {
 		// visitor's browser, and a cookie is not a place where a check made earlier still holds.
 		next: safePath(typeof next === 'string' ? next : null)
 	};
+}
+
+/**
+ * Whether a platform may be used to sign in, as opposed to merely be linked.
+ *
+ * Asked of the registry rather than of the provider, because the answer is the platform's declared
+ * `sign-in` capability and a {@link SignInProvider} does not carry it — the provider is the OAuth
+ * half, and the capability is a property of the platform that owns it.
+ */
+function signsIn(kind: string): boolean {
+	return platformsFor('sign-in').some((entry) => entry.id === kind);
 }

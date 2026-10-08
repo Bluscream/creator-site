@@ -21,11 +21,15 @@ const env = vi.hoisted(() => {
 		secret: string | undefined;
 		twitchId: string | undefined;
 		twitchSecret: string | undefined;
+		youtubeId: string | undefined;
+		youtubeSecret: string | undefined;
 	} = {
 		id: 'client-id',
 		secret: 'client-secret',
 		twitchId: undefined,
-		twitchSecret: undefined
+		twitchSecret: undefined,
+		youtubeId: undefined,
+		youtubeSecret: undefined
 	};
 
 	return state;
@@ -57,10 +61,20 @@ vi.mock('$app/env/private', () => ({
 	},
 	get KICK_CLIENT_SECRET() {
 		return undefined;
+	},
+
+	// Controllable, because YouTube is the platform that can be linked and cannot sign anybody in —
+	// which is the whole subject of the last block in this file.
+	get YOUTUBE_CLIENT_ID() {
+		return env.youtubeId;
+	},
+	get YOUTUBE_CLIENT_SECRET() {
+		return env.youtubeSecret;
 	}
 }));
 
-const { signInConfigured, signInProvider, signInProviders } = await import('./sign-in-registry.js');
+const { linkProvider, signInConfigured, signInProvider, signInProviders } =
+	await import('./sign-in-registry.js');
 
 /** Puts the environment back for the next test, whichever one changed it. */
 function configured(id: string | undefined, secret: string | undefined): void {
@@ -133,5 +147,61 @@ describe('signInConfigured', () => {
 		configured(undefined, undefined);
 
 		expect(signInConfigured()).toBe(false);
+	});
+});
+
+describe('a platform that can be linked but cannot sign anybody in', () => {
+	/**
+	 * The failure this block exists for.
+	 *
+	 * `platform.ts` says capabilities and methods are independent lists, and the account page relies
+	 * on it — but both auth routes resolved their provider through {@link signInProvider}, which
+	 * filters by the `sign-in` capability. A platform that can be linked and cannot sign anybody in
+	 * was therefore offered by the account page and answered 404 by the route.
+	 *
+	 * It was found by mutation: making {@link linkProvider} delegate to {@link signInProvider} broke
+	 * nothing, which meant nothing checked the one thing it was added for.
+	 */
+	function withYouTube(body: () => void): void {
+		env.youtubeId = 'youtube-client-id';
+		env.youtubeSecret = 'youtube-client-secret';
+
+		try {
+			body();
+		} finally {
+			env.youtubeId = undefined;
+			env.youtubeSecret = undefined;
+		}
+	}
+
+	it('is reachable for a link', () => {
+		withYouTube(() => {
+			expect(linkProvider('youtube')?.kind).toBe('youtube');
+		});
+	});
+
+	it('is not offered as a way of signing in', () => {
+		// The other half. A permissive link lookup would be a hole if this were not also true.
+		withYouTube(() => {
+			expect(signInProvider('youtube')).toBeNull();
+			expect(signInProviders().map((provider) => provider.kind)).not.toContain('youtube');
+		});
+	});
+
+	it('is not reachable for a link when it is not configured', () => {
+		expect(linkProvider('youtube')).toBeNull();
+	});
+
+	it('is null for a platform nobody implements', () => {
+		expect(linkProvider('myspace')).toBeNull();
+	});
+
+	it('still resolves a platform that can do both', () => {
+		// A link lookup must not have become a lookup for *only* link-only platforms. Discord is set
+		// here rather than relied on from this file's defaults, which earlier tests unset.
+		env.id = 'client-id';
+		env.secret = 'client-secret';
+
+		expect(linkProvider('discord')?.kind).toBe('discord');
 	});
 });
