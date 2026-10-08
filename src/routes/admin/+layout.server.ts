@@ -24,6 +24,10 @@ export const load: LayoutServerLoad = ({ locals, url }) => {
 		// rather than as the page not being theirs.
 		canSeePeople: atLeast(principal.role, 'admin'),
 
+		// The backup page is the owner's: a download is a copy of every session token and every
+		// linked account's stored credentials, and a restore replaces all of it.
+		canSeeBackup: atLeast(principal.role, 'owner'),
+
 		// Where a sign-out from the admin navigation should land. Not the current page, which needs a
 		// session to view: signing out and being bounced to a sign-in page reads like the sign-out
 		// failed.

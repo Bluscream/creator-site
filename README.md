@@ -707,6 +707,17 @@ Four decisions are worth stating, because each one is a way this goes wrong quie
   whole header is the AES-GCM additional data so the key-derivation parameters written into it
   cannot be weakened by an attacker.
 
+The admin page for it is `/admin/backup`, **owner only** for both halves — a download is a copy of
+every session token and every linked account's stored credentials, and a restore replaces all of
+it. It also offers to look inside an archive without restoring it, because otherwise the only way
+to find out whether a file is the right backup is to restore it.
+
+> **Restoring needs `BODY_SIZE_LIMIT` raised.** `adapter-node` refuses a request body over that
+> limit, and it defaults to 512 KiB — so on a stock install the first real restore fails with a
+> message about the request rather than about the backup. Set it to something above the size of
+> your archive (`BODY_SIZE_LIMIT=536870912` for 512 MiB, which is also the ceiling this page
+> enforces for itself). Taking a backup is unaffected; only the upload goes through a request body.
+
 Uploads, themes and the plugin list belong in here too and are not written yet, because none of
 them exist. They are more entries under their own prefixes; the restore's allow-list is the one
 place that needs extending.

@@ -35,7 +35,8 @@
 	const links = $derived([
 		{ href: '/admin', label: m.admin_title() },
 		{ href: '/admin/account', label: m.admin_nav_account() },
-		...(data.canSeePeople ? [{ href: '/admin/people', label: m.admin_nav_people() }] : [])
+		...(data.canSeePeople ? [{ href: '/admin/people', label: m.admin_nav_people() }] : []),
+		...(data.canSeeBackup ? [{ href: '/admin/backup', label: m.admin_nav_backup() }] : [])
 	]);
 
 	/**

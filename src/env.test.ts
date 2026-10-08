@@ -49,6 +49,20 @@ function documentedVariables(example: string): readonly string[] {
 	return Array.from(example.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm), (match) => match[1] ?? '');
 }
 
+/**
+ * Variables the *runtime* reads rather than this application.
+ *
+ * `adapter-node` reads `BODY_SIZE_LIMIT` itself, before any code here runs, so it cannot be
+ * declared in `src/env.ts` — there would be nothing to read it — and it still has to be in
+ * `.env.example`, because an install that leaves it at the default cannot accept a backup upload
+ * and the failure says nothing about why.
+ *
+ * An explicit list rather than a loosened check: the point of the check below is that a line
+ * somebody will set and expect to do something is worse than an absent one, and that argument is
+ * just as true for a typo in this name. Adding an entry here is a claim that something reads it.
+ */
+const ADAPTER_VARIABLES: readonly string[] = ['BODY_SIZE_LIMIT'];
+
 const declared = declaredVariables(read('src/env.ts'));
 const documented = documentedVariables(read('.env.example'));
 
@@ -95,12 +109,20 @@ describe('.env.example', () => {
 
 	it('mentions no variable the application does not read', () => {
 		// A line someone will set, expecting something to happen. Worse than an absent one.
-		const unknown = documented.filter((name) => !declared.includes(name)).sort();
+		const unknown = documented
+			.filter((name) => !declared.includes(name) && !ADAPTER_VARIABLES.includes(name))
+			.sort();
 
 		expect(
 			unknown,
-			`in .env.example and not declared in src/env.ts:\n${unknown.join('\n')}`
+			`in .env.example and neither declared in src/env.ts nor listed as an adapter variable:\n${unknown.join('\n')}`
 		).toEqual([]);
+	});
+
+	it('documents every adapter variable it makes an exception for', () => {
+		// The exception list is only sound while each entry is actually in the example file. An
+		// entry for a variable nobody documents would silently widen the check above forever.
+		expect(ADAPTER_VARIABLES.filter((name) => !documented.includes(name))).toEqual([]);
 	});
 
 	it('leaves the required variable set and the optional ones commented', () => {

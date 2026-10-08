@@ -99,8 +99,27 @@ test.describe('every admin page is closed', () => {
 	const routes = [
 		{ path: '/admin', action: '' },
 		{ path: '/admin/account', action: '?/endOthers' },
-		{ path: '/admin/people', action: '' }
+		{ path: '/admin/people', action: '' },
+		{ path: '/admin/backup', action: '?/inspect' }
 	];
+
+	test('refuses a backup download to nobody, without writing one', async ({ baseURL, request }) => {
+		// Not in the table above: it is a standalone `POST`-only route rather than a page with
+		// actions, so there is no page to be redirected away from — and it is the one endpoint here
+		// whose success would hand an anonymous caller a copy of the entire database.
+		const response = await request.post('/admin/backup/archive', {
+			headers: { origin: baseURL ?? '' },
+			form: { password: 'a password long enough' },
+			maxRedirects: 0
+		});
+
+		expect([401, 403]).toContain(response.status());
+
+		// And nothing that looks like an archive came back, which is the claim that matters: a guard
+		// that refuses with the right status while still streaming the file would pass on status
+		// alone.
+		expect(response.headers()['content-disposition']).toBeUndefined();
+	});
 
 	for (const { path, action } of routes) {
 		test(`sends an anonymous visitor away from ${path}`, async ({ page }) => {
