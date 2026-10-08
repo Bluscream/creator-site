@@ -36,7 +36,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { sql } from 'drizzle-orm';
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRAGMAS } from './index.js';
+import { PRAGMAS, databaseFile } from './index.js';
 
 /**
  * A table that exists only here.
@@ -172,5 +172,58 @@ describe('the connection pragmas', () => {
 
 	it('waits for a busy database rather than throwing at whoever was second', () => {
 		expect(openConfigured().pragma('busy_timeout', { simple: true })).toBe(5000);
+	});
+});
+
+/**
+ * The two spellings of `DATABASE_URL`.
+ *
+ * Here because the cost of getting this wrong is not a type error or a failed assertion: it is
+ * SQLite's `unable to open database file`, raised against a path that looks correct, which reads
+ * like a permissions problem. It cost a debugging session in this repository.
+ */
+describe('the configured database path', () => {
+	it('passes a plain path through, which is what `.env.example` documents', () => {
+		expect(databaseFile('data/creator-site.db')).toBe('data/creator-site.db');
+	});
+
+	it('accepts the `file:` spelling every other SQLite tool uses', () => {
+		// Drizzle's own documentation, `drizzle-kit`, libSQL and the `sqlite3` CLI all write it this
+		// way, so somebody copying a working value from any of them lands here.
+		expect(databaseFile('file:data/creator-site.db')).toBe('data/creator-site.db');
+	});
+
+	it.each([
+		['a relative url', 'file:./data/site.db', './data/site.db'],
+		['an absolute url', 'file:/srv/site/site.db', '/srv/site/site.db'],
+		['the fully spelled form', 'file:///srv/site/site.db', '/srv/site/site.db'],
+		['an uppercase scheme', 'FILE:data/site.db', 'data/site.db'],
+		['surrounding whitespace from a copy-paste', '  data/site.db\n', 'data/site.db']
+	])('resolves %s', (_name, value, expected) => {
+		expect(databaseFile(value)).toBe(expected);
+	});
+
+	it('decodes an escape, because in a url that is what it means', () => {
+		expect(databaseFile('file:my%20data/site.db')).toBe('my data/site.db');
+	});
+
+	it('leaves a bare path containing a percent alone', () => {
+		// Not a url, so nothing in it is an escape, and a filename may legitimately contain `%`.
+		expect(databaseFile('data/100%25/site.db')).toBe('data/100%25/site.db');
+	});
+
+	it('keeps `:memory:` intact', () => {
+		expect(databaseFile(':memory:')).toBe(':memory:');
+	});
+
+	it('refuses query parameters rather than ignoring them', () => {
+		// The one that matters. `?mode=ro` is a request to open the database read-only, and
+		// `better-sqlite3` cannot honour it from a filename — so stripping it silently would open
+		// read-write exactly the database somebody asked to be protected.
+		expect(() => databaseFile('file:data/site.db?mode=ro')).toThrow(/query parameters/);
+	});
+
+	it('refuses a url naming another host', () => {
+		expect(() => databaseFile('file://elsewhere/site.db')).toThrow(/local file/);
 	});
 });

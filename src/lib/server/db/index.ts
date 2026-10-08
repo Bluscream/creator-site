@@ -43,6 +43,55 @@ import * as schema from './schema.js';
  */
 export const PRAGMAS = ['foreign_keys = ON', 'journal_mode = WAL', 'busy_timeout = 5000'] as const;
 
+/**
+ * `DATABASE_URL` as a filename `better-sqlite3` will actually open.
+ *
+ * The setting is named `URL` and documented as a path, and `better-sqlite3` takes only a path — so
+ * `file:data/site.db`, which is how Drizzle's own documentation, `drizzle-kit`, libSQL and the
+ * `sqlite3` CLI all spell it, was passed through verbatim and looked for a *directory* named
+ * `file:`. SQLite reports that as `unable to open database file`, which reads like a permissions
+ * problem on a path that looks correct in the error message. It cost a debugging session here, so
+ * both spellings are accepted rather than one being a trap.
+ *
+ * A query string is refused instead of stripped. `file:x.db?mode=ro` is a request to open the
+ * database read-only, and `better-sqlite3` cannot honour it from the filename; dropping it silently
+ * would open read-write exactly the database somebody asked to be protected. Better to say so.
+ *
+ * Percent-escapes are decoded, because in a `file:` URL that is what they mean — a path with a
+ * space in it is written `%20` and is a different path if taken literally. A bare path is returned
+ * untouched, so a filename that genuinely contains a `%` still works.
+ */
+export function databaseFile(value: string): string {
+	const trimmed = value.trim();
+
+	if (!/^file:/i.test(trimmed)) return trimmed;
+
+	const rest = trimmed.slice('file:'.length);
+
+	if (rest.includes('?') || rest.includes('#')) {
+		throw new Error(
+			'DATABASE_URL may not carry query parameters: better-sqlite3 opens a path, so options such as `?mode=ro` would be silently ignored. Use a plain path.'
+		);
+	}
+
+	// `file:///abs/path` is the fully-spelled form, with an empty authority. Anything else between
+	// the slashes would be a host, which means a path on another machine — not something to quietly
+	// reinterpret as local.
+	if (/^\/\/./.test(rest) && !rest.startsWith('///')) {
+		throw new Error('DATABASE_URL must name a local file; a `file://host/...` URL is not one.');
+	}
+
+	const path = rest.startsWith('///') ? rest.slice('//'.length) : rest;
+
+	try {
+		return decodeURIComponent(path);
+	} catch {
+		// A stray `%` that is not an escape. The literal path is the better guess, and SQLite will
+		// give the usual error if it is wrong.
+		return path;
+	}
+}
+
 /** The connection type, as every module that takes one needs it. */
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -64,7 +113,7 @@ let open: { readonly db: Db; readonly handle: Database.Database } | null = null;
  */
 export function db(): Db {
 	open ??= (() => {
-		const handle = new Database(DATABASE_URL);
+		const handle = new Database(databaseFile(DATABASE_URL));
 
 		for (const pragma of PRAGMAS) handle.pragma(pragma);
 
