@@ -74,6 +74,30 @@
 	function when(seconds: number): string {
 		return new Date(seconds * 1000).toLocaleString();
 	}
+
+	/** How long a new token may be asked to live, in the page's language. */
+	function lifetimeName(choice: string): string {
+		switch (choice) {
+			case '30d':
+				return m.admin_token_valid_for_30d();
+			case '90d':
+				return m.admin_token_valid_for_90d();
+			case '1y':
+				return m.admin_token_valid_for_1y();
+			default:
+				return m.admin_token_valid_for_never();
+		}
+	}
+
+	/**
+	 * The token that was just created, or null.
+	 *
+	 * `$derived` of the form result rather than state this page keeps, which is what makes it
+	 * disappear on the next action: a credential left on screen after the page has moved on is a
+	 * credential somebody else reads over a shoulder. It is never put in `localStorage`, never in a
+	 * URL, and nothing here logs it.
+	 */
+	const newToken = $derived(form !== null && 'token' in form ? form.token : null);
 </script>
 
 <svelte:head>
@@ -83,7 +107,11 @@
 <h1>{m.admin_account_title()}</h1>
 <p>{m.admin_account_lead()}</p>
 
-{#if form !== null}
+<!--
+	Suppressed when a token was just created: that case has its own notice beside the credential, and
+	a generic "Done" above it would be the first thing read and the less important of the two.
+-->
+{#if form !== null && newToken === null}
 	<p class="notice" role="status">
 		{#if 'error' in form}
 			{m.admin_failed()}
@@ -298,6 +326,130 @@
 	{/if}
 </section>
 
+<section>
+	<h2>{m.admin_tokens()}</h2>
+	<p>{m.admin_tokens_lead()}</p>
+
+	{#if newToken !== null}
+		<!--
+			The one place in this project that puts a credential on screen. The sentence about it never
+			being shown again is beside it rather than further down, because somebody who navigates away
+			without copying it has to create another and the only way to prevent that is to say so where
+			they are looking. `role="status"` so a screen reader is told it appeared.
+
+			A `readonly` input rather than a `<code>` block, so the whole value selects with one click
+			or one keyboard shortcut, and so the browser cannot re-wrap it into something that pastes
+			with a line break in the middle.
+		-->
+		<p class="notice" role="status">{m.admin_token_once()}</p>
+
+		<p class="secret">
+			<input type="text" readonly value={newToken} spellcheck="false" />
+		</p>
+
+		<p><small>{m.admin_token_usage()}</small></p>
+	{/if}
+
+	{#if data.tokens.length === 0}
+		<p><small>{m.admin_tokens_none()}</small></p>
+	{:else}
+		<ul>
+			{#each data.tokens as token (token.id)}
+				<li>
+					<span>
+						<strong>{token.name}</strong>
+
+						<!-- The hint: a true prefix of the token, far too short to present, and the only
+						     thing distinguishing two rows somebody gave the same name. -->
+						<small><code>{token.hint}…</code></small>
+
+						<small>
+							{token.ability === 'write' ? m.admin_token_writes() : m.admin_token_read_only()}
+						</small>
+
+						<!--
+							"Never used" is the state worth acting on: a token created, pasted wrong and
+							forgotten is indistinguishable from a working one without it.
+						-->
+						<small>
+							{token.lastUsedAt === null
+								? m.admin_token_never_used()
+								: m.admin_token_last_used({ when: when(token.lastUsedAt) })}
+						</small>
+
+						<small>
+							{token.expiresAt === null
+								? m.admin_token_never_expires()
+								: m.admin_token_expires({ when: when(token.expiresAt) })}
+						</small>
+
+						<small>{m.admin_token_created({ when: when(token.createdAt) })}</small>
+					</span>
+
+					<span class="actions">
+						<form method="POST" action="?/rotateToken" use:enhance>
+							<!-- The row id, which is the token's hash. Not a credential; same reasoning as
+							     the session rows above. -->
+							<input type="hidden" name="id" value={token.id} />
+							<button type="submit">{m.admin_token_rotate()}</button>
+						</form>
+
+						<form method="POST" action="?/revokeToken" use:enhance>
+							<input type="hidden" name="id" value={token.id} />
+							<button type="submit">{m.admin_token_revoke()}</button>
+						</form>
+					</span>
+				</li>
+			{/each}
+		</ul>
+
+		<p><small>{m.admin_token_rotate_note()}</small></p>
+
+		<form method="POST" action="?/revokeAllTokens" use:enhance>
+			<button type="submit">{m.admin_token_revoke_all()}</button>
+		</form>
+	{/if}
+
+	<!--
+		In a `<details>` because the common thing to do on this page is look at what already exists,
+		and a form that is always open makes creating another look like the expected action.
+	-->
+	<details>
+		<summary>{m.admin_token_new()}</summary>
+
+		<form method="POST" action="?/createToken" use:enhance>
+			<label>
+				{m.admin_token_name()}
+				<input type="text" name="name" required maxlength="60" autocomplete="off" />
+			</label>
+			<small>{m.admin_token_name_hint()}</small>
+
+			<!--
+				`read` first and pre-selected, because it is the right answer for nearly every program
+				anybody will point at this, and a default should never be the dangerous one.
+			-->
+			<label>
+				{m.admin_token_ability()}
+				<select name="ability">
+					<option value="read" selected>{m.admin_token_ability_read()}</option>
+					<option value="write">{m.admin_token_ability_write()}</option>
+				</select>
+			</label>
+
+			<label>
+				{m.admin_token_valid_for()}
+				<select name="lifetime">
+					{#each data.lifetimes as choice (choice)}
+						<option value={choice}>{lifetimeName(choice)}</option>
+					{/each}
+				</select>
+			</label>
+
+			<button type="submit">{m.admin_token_create()}</button>
+		</form>
+	</details>
+</section>
+
 <style>
 	section {
 		margin-top: 2rem;
@@ -382,5 +534,22 @@
 		padding: 0.75rem 1rem;
 		border: 1px solid;
 		border-radius: 0.5rem;
+	}
+
+	/* Monospace and full width, so the token is read and copied rather than squinted at. */
+	.secret input {
+		font-family: ui-monospace, monospace;
+		font-size: 0.9rem;
+		width: 100%;
+		padding: 0.5rem;
+	}
+
+	details select {
+		font: inherit;
+		padding: 0.4rem 0.5rem;
+	}
+
+	code {
+		font-size: 0.85em;
 	}
 </style>

@@ -6,11 +6,17 @@
  * trusting a field, and nothing identifies a row by anything the browser could have swapped for
  * somebody else's.
  *
- * ### Showing session ids is deliberate
+ * ### Showing session and token ids is deliberate
  *
- * A session row's id is the SHA-256 of its token, which cannot be turned back into a cookie. So the
- * page can list sessions and end one by id without ever putting a credential in a form. That is the
- * payoff for keying the table by a hash rather than by the token.
+ * Both tables key a row by the SHA-256 of its secret, which cannot be turned back into a cookie or
+ * a token. So the page can list them and end one by id without ever putting a credential in a form.
+ * That is the payoff for keying by a hash rather than by the secret.
+ *
+ * ### One action returns a credential, and it is the only one
+ *
+ * `createToken` and `rotateToken` return the new token, because nothing stores it and there is no
+ * second chance to show it. Nothing on those paths logs the result, and the page renders it with
+ * the sentence saying it will not be shown again. Every other action here returns a flag.
  *
  * Every action is still scoped to the signed-in user in the query itself, not checked against a
  * field, because an id in a form arrives from outside the trust boundary whatever the page believes
@@ -18,6 +24,15 @@
  */
 
 import { fail } from '@sveltejs/kit';
+import { LIFETIME_CHOICES, lifetimeOf } from './tokens.js';
+import {
+	abilityOf,
+	create as createToken,
+	listOf as tokensOf,
+	revoke as revokeToken,
+	revokeAll as revokeAllTokens,
+	rotate as rotateToken
+} from '#lib/server/api-tokens.js';
 import { identitiesOf, unlinkIdentity } from '#lib/server/accounts.js';
 import { requireSignIn } from '#lib/server/auth/guard.js';
 import { keepGrant } from '#lib/server/auth/flow.js';
@@ -54,6 +69,11 @@ export const load: PageServerLoad = ({ cookies, locals, url }) => {
 		canUnlink: linked.length > 1,
 
 		sessions: sessionsOf(principal.userId, cookies.get(SESSION_COOKIE)),
+
+		// Summaries, which cannot carry a token: the type has no field for one. The only place a
+		// token exists is the return value of `createToken`, once.
+		tokens: tokensOf(principal.userId),
+		lifetimes: LIFETIME_CHOICES,
 
 		// The page-safe shape, which structurally cannot carry a token. Passed through as it is: the
 		// expiry arithmetic is already done by `connectionsOf`, so the template has no dates to
@@ -228,6 +248,77 @@ export const actions: Actions = {
 		return unlink(principal.userId, id)
 			? { unlinked: true }
 			: fail(404, { error: 'no_connection' });
+	},
+
+	/**
+	 * Issues an API token, and returns it the once.
+	 *
+	 * **The only action in this project that returns a credential**, which is the reason for every
+	 * unusual thing about it: the token is in the action result and therefore in this page's HTML for
+	 * a submission without JavaScript, nothing stores it, and nothing can produce it again. The page
+	 * says so at the point somebody is deciding whether to copy it.
+	 *
+	 * The lifetime comes from a fixed set of choices rather than a number field. A free number is a
+	 * field somebody puts `30` in meaning days while the server reads seconds, and the failure is a
+	 * credential that expires in half a minute or in a century.
+	 */
+	createToken: async ({ locals, request, url }) => {
+		const principal = requireSignIn(locals, url);
+		const data = await request.formData();
+		const name = field(data, 'name');
+
+		if (name === null) return fail(400, { error: 'no_name' });
+
+		const made = createToken(principal.userId, {
+			name,
+			// Validated against the vocabulary rather than trusted from the form: a value this
+			// install does not know must become the narrowest, not the widest.
+			ability: abilityOf(field(data, 'ability')),
+			lifetime: lifetimeOf(field(data, 'lifetime'))
+		});
+
+		if (typeof made === 'string') return fail(422, { error: made });
+
+		// Returned, not logged, and not stored. `log()`'s redaction does not cover this shape, so the
+		// rule here is simply that nothing on this path logs the result at all.
+		return { token: made.token };
+	},
+
+	/** Replaces a token's secret, keeping its name, ability and expiry. */
+	rotateToken: async ({ locals, request, url }) => {
+		const principal = requireSignIn(locals, url);
+		const id = field(await request.formData(), 'id');
+
+		if (id === null) return fail(400, { error: 'no_token' });
+
+		// Scoped to the owner inside the query, as everywhere else here.
+		const made = rotateToken(principal.userId, id);
+
+		return made === null ? fail(404, { error: 'no_token' }) : { token: made.token };
+	},
+
+	/** Removes one API token. */
+	revokeToken: async ({ locals, request, url }) => {
+		const principal = requireSignIn(locals, url);
+		const id = field(await request.formData(), 'id');
+
+		if (id === null) return fail(400, { error: 'no_token' });
+
+		return revokeToken(principal.userId, id) ? { revoked: true } : fail(404, { error: 'no_token' });
+	},
+
+	/**
+	 * Removes every API token at once.
+	 *
+	 * The counterpart to "sign out everywhere", and the thing to reach for when a laptop is lost: a
+	 * session cookie and an API token on the same machine are two credentials, and ending one is
+	 * half a job. Deliberately *not* folded into `endOthers`, because somebody signing out their
+	 * other browsers does not mean to break their own backup script.
+	 */
+	revokeAllTokens: ({ locals, url }) => {
+		const principal = requireSignIn(locals, url);
+
+		return { revoked: revokeAllTokens(principal.userId) > 0 };
 	},
 
 	/** Removes a way of signing in. */

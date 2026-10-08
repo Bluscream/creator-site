@@ -6,10 +6,10 @@
  * kind of secret from "how the channel is doing", and an admin who runs the channel's day to day
  * needs these.
  *
- * **No public surface, deliberately.** There is no `/api/metrics` and this is not a load the public
- * page shares. Even the numbers gathered from a platform's own *public* endpoint stay here, because
- * the aggregate is a picture the creator did not publish even when every number in it was already
- * findable somewhere.
+ * **No public surface, deliberately.** `GET /api/metrics` serves the same three values to a program
+ * behind the same `admin` guard, and that is the only other way to them. Even the numbers gathered
+ * from a platform's own *public* endpoint stay behind it, because the aggregate is a picture the
+ * creator did not publish even when every number in it was already findable somewhere.
  *
  * Read-only: there is nothing to submit, so there are no actions. A page with no actions is also a
  * page with nothing for the guard to be forgotten on.

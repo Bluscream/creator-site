@@ -99,7 +99,21 @@ const DDL = [
 	'CREATE INDEX connections_platform ON connections (platform)',
 
 	'CREATE INDEX sessions_user ON sessions (user_id)',
-	'CREATE INDEX sessions_expires ON sessions (expires_at)'
+	'CREATE INDEX sessions_expires ON sessions (expires_at)',
+
+	`CREATE TABLE api_tokens (
+		id TEXT PRIMARY KEY NOT NULL,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		hint TEXT NOT NULL,
+		ability TEXT NOT NULL,
+		expires_at INTEGER,
+		last_used_at INTEGER,
+		created_at INTEGER NOT NULL DEFAULT (unixepoch())
+	)`,
+
+	'CREATE INDEX api_tokens_user ON api_tokens (user_id)',
+	'CREATE INDEX api_tokens_expires ON api_tokens (expires_at)'
 ] as const;
 
 /** Every table name the Drizzle schema declares. */

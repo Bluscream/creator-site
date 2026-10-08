@@ -1,4 +1,5 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts for information about these interfaces.
+import type { Credential } from '#lib/server/auth/guard.js';
 import type { Principal } from '#lib/server/session.js';
 
 declare global {
@@ -18,6 +19,16 @@ declare global {
 			 * cookie directly: a page that resolves its own session is a page that can forget to.
 			 */
 			principal: Principal | null;
+
+			/**
+			 * *How* they are signed in, resolved alongside {@link Locals.principal}.
+			 *
+			 * Null exactly when `principal` is null. Separate from the principal because the two
+			 * answer different questions — "who" and "with what" — and only the second decides
+			 * whether a write is allowed: a session cookie carries a person's full role, while an
+			 * API token may be restricted to reading. Guards read this; routes should not.
+			 */
+			credential: Credential | null;
 		}
 		// interface PageData {}
 		// interface PageState {}

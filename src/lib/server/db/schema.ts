@@ -1,12 +1,12 @@
 /**
  * The database schema.
  *
- * Four tables. Three arrived together because {@link sessions} is the first state in this project
+ * Five tables. Three arrived together because {@link sessions} is the first state in this project
  * that genuinely cannot live in a file: a session has to be revocable, and "sign out everywhere" is
  * a `DELETE ... WHERE user_id = ?` rather than a cookie somebody still holds.
  *
  * The rule this file keeps is that **a table arrives with the code that reads it** — here
- * `accounts.ts` and `session.ts`. A table nobody reads is worse than no table, because it looks like
+ * `accounts.ts`, `session.ts` and `api-tokens.ts`. A table nobody reads is worse than no table, because it looks like
  * a feature that broke. What was here before was the scaffold's `task` table, which nothing imported
  * and every install would have created.
  *
@@ -259,5 +259,95 @@ export const connections = sqliteTable(
 
 		// "What is linked for this platform", which is how a provider resolves its credential.
 		index('connections_platform').on(table.platform)
+	]
+);
+
+/**
+ * What an API token is allowed to do, widest first.
+ *
+ * Two, not a scope vocabulary. The question a token answers is "may this change anything", and that
+ * is the one distinction worth asking somebody to make when they create one: a backup script, a
+ * monitoring check and a metrics dashboard all want `read`, and handing them `write` is the mistake
+ * this exists to let people avoid. A finer vocabulary would have to name every endpoint, and a scope
+ * list that drifts out of step with the routes is worse than none, because it reads like a guarantee.
+ *
+ * Ordered widest first to match {@link ROLES}, so the comparison is an index comparison in both
+ * places rather than two different idioms.
+ */
+export const ABILITIES = ['write', 'read'] as const;
+
+/** One of {@link ABILITIES}. */
+export type Ability = (typeof ABILITIES)[number];
+
+/** What a token gets when nobody chose. The narrowest, as with {@link DEFAULT_ROLE}. */
+export const DEFAULT_ABILITY: Ability = 'read';
+
+/**
+ * An API token: a credential a person issues to a program acting for them.
+ *
+ * ### The id is a hash, exactly as in {@link sessions}
+ *
+ * The holder has a random token; this table has its SHA-256. So a lookup is hashing what arrived and
+ * selecting by primary key, a leak of the whole table yields nothing presentable, and a row can be
+ * listed and revoked by its own id without a page ever handling the credential.
+ *
+ * SHA-256 rather than a password hash, for the reason the session table gives: the secret is 256
+ * bits from `randomBytes`, so there is no dictionary to make expensive and nothing to guess. A slow
+ * hash here would only make every API request slow.
+ *
+ * ### `hint` is not a credential, and no role is stored
+ *
+ * `hint` is the first few characters of the token — enough to tell two rows apart in a list, far too
+ * little to present. The token deliberately carries **no role of its own**: a request made with one
+ * acts with the owner's *current* role, read from {@link users} at use time, so demoting somebody
+ * takes effect on their tokens immediately instead of leaving a credential behind that still holds
+ * the role they had when they made it.
+ */
+export const apiTokens = sqliteTable(
+	'api_tokens',
+	{
+		/** SHA-256 of the token, hex. See the note above. */
+		id: text('id').primaryKey(),
+
+		userId: text('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+
+		/** What the person called it — "backup script", "uptime check". Theirs, shown back to them. */
+		name: text('name').notNull(),
+
+		/** The token's first few characters. Non-secret, and the only way to tell rows apart. */
+		hint: text('hint').notNull(),
+
+		/** One of {@link ABILITIES}, validated by the code that writes it. */
+		ability: text('ability').notNull().$type<Ability>(),
+
+		/**
+		 * Unix seconds this token stops working at, or null for one that does not expire.
+		 *
+		 * Nullable rather than defaulted to some far-future date: "this never expires" is a decision
+		 * somebody made and should read as one, and a sentinel year would eventually arrive.
+		 */
+		expiresAt: integer('expires_at'),
+
+		/**
+		 * When it was last presented, in unix seconds, or null for one never used.
+		 *
+		 * Null is the useful part. A token created, pasted wrong and forgotten looks exactly like a
+		 * working one until this column distinguishes them, and "never used" is the most actionable
+		 * thing a list of credentials can say.
+		 */
+		lastUsedAt: integer('last_used_at'),
+
+		createdAt: integer('created_at')
+			.notNull()
+			.default(sql`(unixepoch())`)
+	},
+	(table) => [
+		// "My tokens", which is the account page, and the scope every mutation is constrained by.
+		index('api_tokens_user').on(table.userId),
+
+		// Sweeping expired rows is a range scan over this, as it is for sessions.
+		index('api_tokens_expires').on(table.expiresAt)
 	]
 );

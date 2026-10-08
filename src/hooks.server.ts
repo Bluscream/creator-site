@@ -2,6 +2,7 @@ import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
 import { sequence } from '@sveltejs/kit/hooks';
 import { startGateway } from '#lib/server/events.js';
 import { SESSION_COOKIE, resolve as resolveSession } from '#lib/server/session.js';
+import { resolve as resolveToken, tokenFromHeader } from '#lib/server/api-tokens.js';
 import {
 	baseLocale,
 	cookieName,
@@ -75,12 +76,39 @@ const handleParaglide: Handle = ({ event, resolve }) =>
  * The cookie is refreshed when the session renewed, so a browser that keeps visiting keeps a cookie
  * whose own expiry matches the row's. Without this the row would slide and the cookie would still
  * expire thirty days after it was issued, signing out somebody whose session was perfectly alive.
+ *
+ * ### `Authorization: Bearer` is the other way in
+ *
+ * A request carrying a bearer token is resolved as an API token and the cookie is not consulted.
+ * The precedence is that way round because the header is the explicit signal: a creator testing
+ * their own API from a tool in the browser they are signed in to means the token they attached,
+ * not the session riding along behind it — and quietly preferring the cookie would make a
+ * read-only token appear to write, for exactly the person trying to check that it cannot.
+ *
+ * A token renews nothing and sets no cookie, and it does not reach a page: `requireSignIn` refuses
+ * it, which keeps the admin's form actions a session-only surface. See `auth/guard.ts`.
+ *
+ * Exported for `hooks.server.test.ts`. Nothing else imports it — SvelteKit reads `handle`, and a
+ * route reaching for this instead of `event.locals` would be resolving the session twice.
  */
-const handleSession: Handle = ({ event, resolve }) => {
+export const handleSession: Handle = ({ event, resolve }) => {
+	const bearer = tokenFromHeader(event.request.headers.get('authorization'));
+
+	if (bearer !== null) {
+		const presented = resolveToken(bearer);
+
+		event.locals.principal = presented?.principal ?? null;
+		event.locals.credential =
+			presented === null ? null : { kind: 'token', id: presented.id, ability: presented.ability };
+
+		return resolve(event);
+	}
+
 	const token = event.cookies.get(SESSION_COOKIE);
 	const session = token === undefined ? null : resolveSession(token);
 
 	event.locals.principal = session?.principal ?? null;
+	event.locals.credential = session === null ? null : { kind: 'session' };
 
 	if (session !== null && token !== undefined) {
 		event.cookies.set(SESSION_COOKIE, token, {

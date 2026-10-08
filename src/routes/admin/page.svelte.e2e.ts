@@ -156,3 +156,82 @@ test.describe('every admin page is closed', () => {
 		});
 	}
 });
+
+/**
+ * That the admin API is closed, as served, and refuses in a shape a client can read.
+ *
+ * A separate block from the pages because the correct refusal is a different one: a page redirects a
+ * browser, an endpoint answers a status and a JSON body. Getting that backwards is not a security
+ * hole but it is the bug that wastes an afternoon — a script receiving a 303 to an HTML sign-in page
+ * reports a parse error with no mention of authentication anywhere in it.
+ *
+ * Nothing here signs in, for the reason the top of this file gives. What is asserted is the half
+ * that holds for every install with nobody signed in.
+ */
+test.describe('the admin API is closed', () => {
+	test('refuses an anonymous GET of the metrics', async ({ request }) => {
+		const response = await request.get('/api/metrics', { maxRedirects: 0 });
+
+		expect(response.status()).toBe(401);
+	});
+
+	test('does not redirect, so a client reads an answer rather than a page', async ({ request }) => {
+		const response = await request.get('/api/metrics', { maxRedirects: 0 });
+
+		expect(response.headers().location).toBeUndefined();
+	});
+
+	test('says why, in the envelope every other endpoint uses', async ({ request }) => {
+		const response = await request.get('/api/metrics', { maxRedirects: 0 });
+
+		expect(await response.json()).toMatchObject({ ok: false, reason: 'not_authenticated' });
+	});
+
+	test('tells no cache to keep the refusal', async ({ request }) => {
+		// The whole response depends on who asked. A shared cache storing this would be storing an
+		// answer that is wrong for the next caller in either direction.
+		const response = await request.get('/api/metrics', { maxRedirects: 0 });
+
+		expect(response.headers()['cache-control']).toContain('no-store');
+	});
+
+	test('refuses a made-up token the same way, with no hint that it was parsed', async ({
+		request
+	}) => {
+		// A different status or message for "not one of ours" against "one of ours but unknown" would
+		// let somebody enumerate which prefixes are real. Both are 401 with the same reason.
+		const response = await request.get('/api/metrics', {
+			headers: { authorization: 'Bearer crs_notarealtokenatall' },
+			maxRedirects: 0
+		});
+
+		expect(response.status()).toBe(401);
+		expect(await response.json()).toMatchObject({ reason: 'not_authenticated' });
+	});
+
+	test('leaks no figures in the refusal body', async ({ request }) => {
+		// The claim that actually matters: a guard answering 401 while still serializing the payload
+		// would pass every assertion above.
+		const response = await request.get('/api/metrics', { maxRedirects: 0 });
+		const body = await response.text();
+
+		expect(body).not.toContain('platforms');
+		expect(body).not.toContain('overall');
+	});
+
+	test('answers 405 to a write, rather than pretending there is one', async ({
+		baseURL,
+		request
+	}) => {
+		// `content-type: application/json` deliberately. SvelteKit's origin check only guards the
+		// form content types, so a JSON POST reaches the route — which means the route's own method
+		// declaration is what refuses it, and that is the thing under test.
+		const response = await request.post('/api/metrics', {
+			headers: { origin: baseURL ?? '', 'content-type': 'application/json' },
+			data: {},
+			maxRedirects: 0
+		});
+
+		expect(response.status()).toBe(405);
+	});
+});

@@ -18,13 +18,24 @@
  * - `upstream_unavailable` — someone else's service is down or rate-limiting. Temporary.
  * - `internal_error` — a bug here.
  * - `method_not_allowed` — the caller used the wrong verb.
+ * - `not_authenticated` — no credential, or one no longer valid. Present one and retry.
+ * - `not_permitted` — a valid credential that is not enough: the wrong role, or a read-only API
+ *   token on something that writes. Retrying with the same credential will never work, which is
+ *   the distinction from `not_authenticated` and the only reason these are two reasons.
+ *
+ * `token_rejected` is deliberately *not* reused for the last two. It means **the operator's
+ * credential for somebody else's platform** was refused — a Twitch token that lapsed — and a client
+ * that conflated them would tell a creator to re-link Twitch when the real answer was that the API
+ * token they are calling with may only read.
  */
 export type FailureReason =
 	| 'not_configured'
 	| 'token_rejected'
 	| 'upstream_unavailable'
 	| 'internal_error'
-	| 'method_not_allowed';
+	| 'method_not_allowed'
+	| 'not_authenticated'
+	| 'not_permitted';
 
 /**
  * Thrown by a provider or reader that knows which refusal it wants.

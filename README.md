@@ -719,14 +719,17 @@ choice:
   `ts.sys.readFile`) and ESLint's module loading. Revisit once both support it.
 - **Vitest is pinned to 4.x**, because `vitest-browser-svelte` still peers on `vitest@^4`.
 
-## Metrics: a provider seam, and one admin-only page
+## Metrics: a provider seam, one admin page, one admin endpoint
 
 Anything that reports how the channels are doing is a `MetricsSourceProvider`, over the **same
 configured sources** as the feed — a creator who has said "this is my Bluesky account" does not say
 it again. `/admin/metrics` consolidates them: everything together, then platform by platform.
 
-**Admin-only, no API surface, no public route.** These are business figures, and the aggregate is a
-picture the creator did not publish even when every number in it was already findable somewhere.
+**Admin-only, and no public route.** These are business figures, and the aggregate is a picture the
+creator did not publish even when every number in it was already findable somewhere. `GET
+/api/metrics` serves the same three values to a program behind the same guard — see
+[the admin over the API](#the-admin-over-the-api-and-tokens-to-reach-it-with) — and those two are
+the only ways to them.
 
 Four things it refuses to get wrong:
 
@@ -768,6 +771,71 @@ that is not one; only a real plugin answering a real request shows that the prem
 also where a real bug turned up: the plugins answer `null` for a channel they cannot resolve, which
 was being read as "no count published" — so a typo in a channel url would have left an empty
 platform block on the page forever with nothing saying why.
+
+## The admin over the API, and tokens to reach it with
+
+Everything the admin reads, a program can read. `GET /api/metrics` is the first of them and returns
+exactly what `/admin/metrics` renders, behind exactly the same `admin` guard. The alternative to an
+endpoint is somebody scraping the page with a copy of their session cookie, which is worse in every
+direction.
+
+A request authenticates one of two ways, and the two reach different surfaces:
+
+|                       | credential                    | reaches                                 |
+| --------------------- | ----------------------------- | --------------------------------------- |
+| a person in a browser | the session cookie            | pages, their form actions, and `/api/…` |
+| a program             | `Authorization: Bearer crs_…` | `/api/…` only                           |
+
+**A token cannot drive a page.** Not because serving HTML to a script would be harmful, but because
+pages carry form actions — writes reached by a `POST` to the page's own path, guarded by nothing but
+`requireSignIn`. Allowing a token there would silently give every existing action a second way in
+with no ability check, since none of them was written with a non-browser caller in mind. Keeping the
+surfaces disjoint means a new action cannot accidentally become a token-reachable write.
+
+### Tokens, as a creator manages them
+
+On `/admin/account`: create, list, replace the secret, remove one, remove all. Each has a name, an
+**ability** — `read` or `write`, defaulting to read — and a lifetime from a fixed set, including
+"until I remove it".
+
+- **The token is shown once.** Nothing stores it: the row's primary key is its SHA-256, exactly as
+  with a session. A database that leaks therefore leaks nothing presentable, and a list can be
+  rendered and a row revoked without a page ever handling the credential. A `hint` — the first six
+  characters — is what distinguishes two rows in the list.
+- **A `crs_` prefix**, so a leaked token is _findable_. Secret scanners, `gitleaks` and this
+  project's own `secretlint` hook all work by recognising shapes, and an unprefixed base64 blob in a
+  CI log is indistinguishable from a hash. Four characters for that is a bargain.
+- **No role is stored on the token.** A request made with one acts with its owner's _current_ role,
+  read live from `users`, so demoting somebody takes effect on their tokens at once rather than
+  leaving a credential behind that still carries what they used to be.
+- **`read` cannot write, whatever the role.** An owner's read-only token holds the widest role in
+  the installation and still cannot change anything, which is what makes it safe to paste into a
+  monitoring tool. `requireApi` takes no default ability, so a write endpoint has to ask for the
+  ability in writing: a defaulted one would be permitted to a read-only token by nothing but a
+  forgotten parameter, and it would work perfectly when tested with a cookie.
+- **Replacing a secret keeps the expiry** rather than extending it. Rotating means "this may have
+  leaked", not "give me another year"; the alternative makes a deliberately short-lived token
+  immortal by maintenance.
+- **"Never used" is recorded**, because a token created, pasted wrong and forgotten is otherwise
+  indistinguishable from a working one. Later use is written at most hourly, so a read-only API is
+  not one database write per call.
+
+### Three things worth writing down
+
+`Authorization` wins over the cookie when both are present. The header is the explicit signal, and
+preferring the cookie would make a read-only token appear able to write for exactly the person
+testing that it cannot — they are the one signed in to the admin in the browser they test from.
+
+A guarded endpoint must pass `visibility: 'private'` to `serve()`, which emits `private, no-store`
+and varies on the credential headers. `public` on an authenticated response is a standing
+instruction to any CDN or company proxy in the path that it may serve one admin's figures to the
+next caller, and it is the kind of mistake that behaves perfectly in development, where there is no
+shared cache. The guard is also called _inside_ the reader, so its 401 or 403 comes back in the same
+JSON envelope as every other response rather than as SvelteKit's own error page.
+
+For the record, read out of Kit's own source rather than assumed: its CSRF origin check covers only
+the form content types, so a `POST` carrying `content-type: application/json` reaches the route,
+while one with _no_ content-type is refused before any route code runs.
 
 ## Backup and restore: one file, and nothing half-applied
 
