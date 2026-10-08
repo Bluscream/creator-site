@@ -108,6 +108,9 @@ describe('reading an account’s videos', () => {
 			],
 			kind: 'video',
 			at: '2026-10-01T13:31:57.000Z',
+			duration: null,
+			views: null,
+			live: false,
 			author: { name: 'Someone' }
 		});
 	});

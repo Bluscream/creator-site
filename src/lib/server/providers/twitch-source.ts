@@ -91,7 +91,13 @@ const listSchema = z.object({
 					broadcaster_name: z.string().optional(),
 					user_name: z.string().optional(),
 					thumbnail_url: z.string().optional(),
-					created_at: z.string().optional()
+					created_at: z.string().optional(),
+
+					// `duration` is two different types across the endpoint pair: a VOD's is Twitch's
+					// own `"3h20m31s"` string, a clip's is a float of seconds. Both are accepted here
+					// and reconciled by {@link seconds}.
+					duration: z.union([z.string(), z.number()]).optional(),
+					view_count: z.number().optional()
 				})
 				.loose()
 		)
@@ -320,8 +326,36 @@ function toPost(
 		excerpt: describe(entry, kind),
 		image: thumbnail(entry.thumbnail_url),
 		publishedAt: entry.created_at,
-		author: entry.broadcaster_name ?? entry.user_name
+		author: entry.broadcaster_name ?? entry.user_name,
+		duration: seconds(entry.duration),
+		views: entry.view_count
 	});
+}
+
+/**
+ * Twitch's two duration formats, as seconds.
+ *
+ * A clip's arrives as a number already. A VOD's arrives as `"3h20m31s"` — Twitch's own notation,
+ * with each part omitted when it is zero, so `"47s"` and `"16m12s"` are both real answers. Parsed by
+ * summing whatever parts are present rather than by matching a fixed shape, because a fixed shape
+ * would silently return null for two of the three forms.
+ *
+ * Anything that is not one of those is null: this value comes from outside, and a renderer showing
+ * nothing is better than one showing `NaN`.
+ */
+function seconds(value: string | number | undefined): number | null {
+	if (typeof value === 'number') return value;
+	if (typeof value !== 'string') return null;
+
+	const parts = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(value.trim());
+
+	// The pattern is all-optional, so it also matches the empty string. A duration of nothing is not
+	// a duration.
+	if (parts === null || parts[0] === '') return null;
+
+	const [, hours, minutes, rest] = parts;
+
+	return Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(rest ?? 0);
 }
 
 /** The second line of a row. A VOD has a description; a clip has none. */

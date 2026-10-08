@@ -143,6 +143,56 @@ describe('building a post', () => {
 	});
 });
 
+/**
+ * Duration, view count and live.
+ *
+ * Borrowed from GrayJay's `PlatformVideo` after comparing the two models field by field. The
+ * platforms send these inconsistently — a clip's duration is a float, a view count is often absent
+ * — and the failure mode of getting it wrong is `NaN`, which is worse than it looks: it reaches a
+ * cache file as the JSON literal `null` and comes back failing the parser, a long way from the
+ * provider that produced it.
+ */
+describe('a count the platform may or may not have sent', () => {
+	/** A raw post that is otherwise minimal, built. */
+	const built = (raw: Partial<Parameters<typeof buildPost>[1]>) =>
+		buildPost(source, { id: '1', url: 'https://example.com/a', ...raw });
+
+	it('is null when the platform said nothing', () => {
+		expect(built({})).toMatchObject({ duration: null, views: null, live: false });
+	});
+
+	it('keeps a real count', () => {
+		expect(built({ duration: 3723, views: 1863 })).toMatchObject({ duration: 3723, views: 1863 });
+	});
+
+	it('keeps zero, which is a real number', () => {
+		// Distinct from null: a video with no views, and a platform that publishes no counts, are
+		// different facts — and a `?? 0` at some callsite would merge them.
+		expect(built({ views: 0 })?.views).toBe(0);
+	});
+
+	it('rounds a fractional duration, as a clip sends', () => {
+		expect(built({ duration: 28.4 })?.duration).toBe(28);
+	});
+
+	it('refuses NaN rather than storing it', () => {
+		expect(built({ duration: Number.NaN, views: Number.NaN })).toMatchObject({
+			duration: null,
+			views: null
+		});
+	});
+
+	it('refuses infinity and a negative count', () => {
+		expect(built({ duration: Number.POSITIVE_INFINITY })?.duration).toBeNull();
+		expect(built({ views: -5 })?.views).toBeNull();
+	});
+
+	it('is live only when the platform says so', () => {
+		expect(built({ live: true })?.live).toBe(true);
+		expect(built({ live: false })?.live).toBe(false);
+	});
+});
+
 describe('plain text', () => {
 	it('collapses every kind of whitespace run into one space', () => {
 		expect(plain('a \t\n  b\r\nc')).toBe('a b c');

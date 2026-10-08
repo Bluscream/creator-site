@@ -96,7 +96,11 @@ describe('reading an author feed', () => {
 			body: 'A post about otters with a second line',
 			media: [],
 			at: '2026-10-05T10:00:00.000Z',
-			author: { name: 'Someone' }
+			author: { name: 'Someone' },
+			// A Bluesky post has no length and no public view count.
+			duration: null,
+			views: null,
+			live: false
 		});
 	});
 

@@ -108,7 +108,10 @@ const cachedPosts: Parse<readonly ContentPiece[]> = (value) =>
 				body: z.string(),
 				at: z.string().nullable(),
 				author: cachedActor.nullable(),
-				media: z.array(cachedMedia)
+				media: z.array(cachedMedia),
+				duration: z.number().nullable(),
+				views: z.number().nullable(),
+				live: z.boolean()
 			})
 		)
 		.parse(value);

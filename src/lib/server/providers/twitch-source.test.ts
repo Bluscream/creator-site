@@ -263,7 +263,12 @@ describe('reading a channel', () => {
 				{ url: 'https://static-cdn.jtvnw.net/cf_vods/abc/thumb/thumb0-480x270.jpg', kind: 'image' }
 			],
 			at: '2026-10-01T13:31:57.000Z',
-			author: { name: 'Someone' }
+			author: { name: 'Someone' },
+			// Twitch's own `"3h8m33s"`, as seconds. Both of these were in the response all along and
+			// were being thrown away.
+			duration: 11_313,
+			views: 1863,
+			live: false
 		});
 	});
 
@@ -275,6 +280,65 @@ describe('reading a channel', () => {
 		expect(clip?.body).toBe('Clip by A Viewer');
 		expect(clip?.author?.name).toBe('Someone');
 		expect(clip?.kind).toBe('clip');
+	});
+
+	/**
+	 * Twitch sends `duration` as two different types across one pair of endpoints.
+	 *
+	 * A VOD's is Twitch's own `"3h8m33s"` notation; a clip's is a float of seconds. One reader
+	 * returns both, so one function has to accept both — and each part of the string is omitted when
+	 * it is zero, so a pattern matching the full `h`/`m`/`s` shape would quietly return nothing for
+	 * `"47s"` and `"16m12s"`, which is most of a channel's clips.
+	 */
+	it("reads a VOD's duration out of Twitch's own notation", async () => {
+		const posts = await twitchSourceProvider.read(source, working());
+		const vod = posts.find((post) => post.id.includes('videos-'));
+
+		// `3h8m33s` in the response.
+		expect(vod?.duration).toBe(3 * 3600 + 8 * 60 + 33);
+	});
+
+	it("rounds a clip's fractional seconds", async () => {
+		const posts = await twitchSourceProvider.read(source, working());
+		const clip = posts.find((post) => post.id.includes('clips-'));
+
+		// `12.9` in the response.
+		expect(clip?.duration).toBe(13);
+	});
+
+	it.each([
+		['47s', 47],
+		['16m12s', 972],
+		['1h', 3600],
+		['2h30m', 9000]
+	])('reads the partial form %s', async (duration, expected) => {
+		const context = working({ 'helix/videos': { body: { data: [{ ...VIDEO, duration }] } } });
+		const [post] = await twitchSourceProvider.read(source, context);
+
+		expect(post?.duration).toBe(expected);
+	});
+
+	it.each([['not a duration'], ['']])(
+		'leaves a duration it cannot read as null rather than NaN (%s)',
+		async (duration) => {
+			const context = working({ 'helix/videos': { body: { data: [{ ...VIDEO, duration }] } } });
+			const [post] = await twitchSourceProvider.read(source, context);
+
+			expect(post?.duration).toBeNull();
+		}
+	);
+
+	it('carries the view count both endpoints were already sending', async () => {
+		const posts = await twitchSourceProvider.read(source, working());
+
+		expect(posts.find((post) => post.id.includes('videos-'))?.views).toBe(1863);
+		expect(posts.find((post) => post.id.includes('clips-'))?.views).toBe(10);
+	});
+
+	it('marks neither a VOD nor a clip as live, because neither is', async () => {
+		const posts = await twitchSourceProvider.read(source, working());
+
+		expect(posts.every((post) => !post.live)).toBe(true);
 	});
 
 	it('leaves a blank VOD description as no excerpt', async () => {

@@ -38,6 +38,9 @@ function post(overrides: Partial<ContentPiece> = {}): ContentPiece {
 		at: '2026-10-07T16:30:15.000Z',
 		author: { name: 'BleichiLoveless' },
 		media: [{ url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg', kind: 'image' }],
+		duration: 2421,
+		views: 1312,
+		live: false,
 		...overrides
 	};
 }

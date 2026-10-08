@@ -99,7 +99,10 @@ describe('an RSS feed', () => {
 			body: 'Body here',
 			at: '2026-10-06T11:34:44.000Z',
 			author: null,
-			media: [{ url: 'https://example.com/t.jpg', kind: 'image' }]
+			media: [{ url: 'https://example.com/t.jpg', kind: 'image' }],
+			duration: null,
+			views: null,
+			live: false
 		});
 	});
 

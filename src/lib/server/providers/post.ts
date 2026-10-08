@@ -130,6 +130,20 @@ export interface RawPost {
 
 	/** The author's profile page, where the platform has one. */
 	readonly authorProfileUrl?: string | null | undefined;
+
+	/**
+	 * How long it runs, in seconds, where the platform says.
+	 *
+	 * Absent for a platform that has no notion of length, and absent for one that simply did not
+	 * say — the two are different facts and neither gives a renderer anything to do differently.
+	 */
+	readonly duration?: number | null | undefined;
+
+	/** How many times it has been seen, where the platform publishes a count. */
+	readonly views?: number | null | undefined;
+
+	/** Whether it is happening right now. Absent means it is not. */
+	readonly live?: boolean | undefined;
 }
 
 /**
@@ -158,6 +172,9 @@ export function buildPost(source: ResolvedSource, raw: RawPost): ContentPiece | 
 			...optional('avatarUrl', image(raw.authorAvatarUrl)),
 			...optional('profileUrl', image(raw.authorProfileUrl))
 		}),
+		duration: count(raw.duration),
+		views: count(raw.views),
+		live: raw.live === true,
 		media:
 			picture === null
 				? []
@@ -169,6 +186,19 @@ export function buildPost(source: ResolvedSource, raw: RawPost): ContentPiece | 
 						}
 					]
 	};
+}
+
+/**
+ * A non-negative whole number, or null.
+ *
+ * Platforms send these as floats (a clip's duration), as strings, and occasionally as nonsense.
+ * Anything that is not a usable count becomes null rather than `NaN`, which would survive into the
+ * cache, out of the API as the JSON literal `null` anyway, and into a renderer as "NaN views".
+ */
+function count(value: number | null | undefined): number | null {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+
+	return Math.round(value);
 }
 
 /**

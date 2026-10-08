@@ -111,7 +111,10 @@ function post(source: string, id: string, at: string): ContentPiece {
 		body: '',
 		at,
 		author: null,
-		media: []
+		media: [],
+		duration: null,
+		views: null,
+		live: false
 	};
 }
 

@@ -38,6 +38,39 @@
  *
  * This module is shared between server and client deliberately: it is the contract the API speaks,
  * so a component and a provider refer to the same declaration rather than two that agree today.
+ *
+ * ### Why these types and not GrayJay's
+ *
+ * A fair question, since this project can read GrayJay source plugins and they already define
+ * `PlatformVideo`, `PlatformAuthorLink`, `Thumbnails`, `LiveEventComment` and the rest. Reusing them
+ * would mean one fewer vocabulary. It was checked field by field against the engine's own models,
+ * and the answer is no — those types are a *plugin API for a video player*, and five of the things
+ * this project does would have to be given up to adopt them:
+ *
+ * - **`LiveEventDonation.Amount` is a pre-formatted string.** This project formats money in the
+ *   page's language with `Intl.NumberFormat`, which needs a number and an ISO 4217 code. There is no
+ *   currency field to take, and no `count_name` either, so "3 diamonds" has nowhere to live.
+ * - **Chat has no resolved segments.** `LiveEventComment` is a name, a message and a thumbnail, with
+ *   badges as bare strings. Emote images and badge images — most of what the chat page draws — are
+ *   not expressible.
+ * - **`Thumbnail` is a url and a quality, with no expiry.** {@link Media.expiresAt} is load-bearing
+ *   here: TikTok's cover urls die after six hours, and it is what lets a stale row keep its text and
+ *   drop its picture.
+ * - **`PlatformContent.DateTime` is not nullable.** Plenty of feeds omit a date, and this project
+ *   sorts those last rather than inventing one.
+ * - **There is no "which configured source".** GrayJay has one plugin per platform; a creator here
+ *   can configure two YouTube channels, and {@link Entity.source} is how they stay apart.
+ *
+ * It also has nothing for linked accounts, roles, sessions, calendar events or shop items, which are
+ * the rest of this product.
+ *
+ * So GrayJay's types belong **at the adapter boundary** — a plugin returns a `PlatformVideo` and one
+ * mapper turns it into a {@link ContentPiece}, exactly as the Twitch and Bluesky readers map their
+ * platforms' shapes. That is the job this module exists to do, and a translation layer that adopted
+ * one vendor's vocabulary as its own would not be one.
+ *
+ * The comparison was not one-sided: `PlatformVideo` carries {@link ContentPiece.duration},
+ * {@link ContentPiece.views} and {@link ContentPiece.live}, which this type was missing and now has.
  */
 
 /**
@@ -230,6 +263,34 @@ export interface ContentPiece extends Entity {
 	 * placed to make. Empty is ordinary.
 	 */
 	readonly media: readonly Media[];
+
+	/**
+	 * How long it runs, in whole seconds, or null for something that has no length.
+	 *
+	 * Null for a text post, and null for a video whose platform did not say — those are different
+	 * facts but not ones a renderer can act on differently, so they share a value. Seconds rather
+	 * than a formatted string, because "3h20m31s" is a rendering decision and a sort on it is wrong.
+	 *
+	 * Borrowed from GrayJay's `PlatformVideo`, which carries it where this type did not. Twitch's
+	 * reader was already fetching it and throwing it away.
+	 */
+	readonly duration: number | null;
+
+	/**
+	 * How many times it has been seen, or null where the platform does not say.
+	 *
+	 * Null rather than zero, which is a real and different number: a video with no views and a
+	 * platform that does not publish counts should not render the same.
+	 */
+	readonly views: number | null;
+
+	/**
+	 * Whether this is happening right now.
+	 *
+	 * Not derivable from {@link kind}: a `stream` is a past broadcast once it ends, and the same
+	 * reader returns both. A renderer uses this for the badge that makes somebody click.
+	 */
+	readonly live: boolean;
 }
 
 /**
