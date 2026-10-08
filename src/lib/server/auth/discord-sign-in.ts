@@ -3,7 +3,11 @@
  *
  * A port of `www/lib/Auth.php`, which built the authorize URL and the token exchange by hand. What
  * is kept is the set of decisions that file made and justified; what is dropped is the plumbing,
- * which `arctic` does.
+ * which `./oauth2.ts` does.
+ *
+ * Discord authenticates at the token endpoint with HTTP **Basic**, which is what `arctic` sent for it
+ * and what this keeps. Twitch wants the secret in the body instead, which is why that choice is a
+ * per-provider setting rather than a default.
  *
  * ### `identify` and nothing else
  *
@@ -20,12 +24,19 @@
  * decoration that may change at any sign-in.
  */
 
-import { Discord, OAuth2RequestError } from 'arctic';
 import { z } from 'zod';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET } from '$app/env/private';
 import type { ProviderIdentity } from '../accounts.js';
+import { OAuth2Failure, authorizationUrl, codeVerifier, exchangeCode } from './oauth2.js';
+import type { Callback, OAuth2App } from './oauth2.js';
 import { SignInFailure } from './sign-in-provider.js';
 import type { Authorization, SignInProvider } from './sign-in-provider.js';
+
+/** Where the visitor approves. */
+const AUTHORIZATION_ENDPOINT = 'https://discord.com/oauth2/authorize';
+
+/** Where the code is exchanged. */
+const TOKEN_ENDPOINT = 'https://discord.com/api/oauth2/token';
 
 /** Where the current user's own account is read from. */
 const IDENTITY = 'https://discord.com/api/v10/users/@me';
@@ -65,35 +76,43 @@ export function discordSignIn(): SignInProvider {
 
 		usable: () => DISCORD_CLIENT_ID !== undefined && DISCORD_CLIENT_SECRET !== undefined,
 
-		authorize: (state, redirectUri): Authorization => ({
-			// Null verifier: Discord's flow is a confidential client with a secret, and `arctic`'s
-			// Discord provider treats PKCE as optional. The `state` parameter is what protects this
-			// flow, and `./flow.ts` is what checks it.
-			url: client(redirectUri).createAuthorizationURL(state, null, [...SCOPES]),
-			verifier: null
-		}),
+		authorize: async (state, redirectUri): Promise<Authorization> => {
+			// PKCE, although this is a confidential client with a secret and Discord treats it as
+			// optional. `state` already binds the callback to this browser; PKCE binds the *code* to
+			// this exchange, so a code that leaks — a referrer, a shared screen, a proxy log — cannot be
+			// redeemed by whoever picked it up. `arctic` passed null here and Discord accepted it; there
+			// was never a reason not to.
+			const verifier = codeVerifier();
 
-		identify: async (code, verifier, redirectUri) => {
-			const token = await exchange(code, verifier, redirectUri);
+			return {
+				url: await authorizationUrl(app(), { state, redirectUri, scopes: SCOPES, verifier }),
+				verifier
+			};
+		},
 
-			return account(token);
-		}
+		identify: async (callback) => account(await exchange(callback))
 	};
 }
 
 /**
- * The `arctic` client, built per call.
+ * This application's OAuth configuration.
  *
- * Per call rather than once at module load because the redirect URI depends on the request: this
- * site answers on several hostnames and each one needs the redirect it registered. Constructing it
- * is assigning three strings.
+ * Built per call rather than once at module load so that importing this module reads no environment
+ * and an unconfigured install fails at the point somebody tries to use it, with a sentence about the
+ * site rather than a type error. Constructing it is assigning five strings.
  */
-function client(redirectUri: string): Discord {
+function app(): OAuth2App {
 	if (DISCORD_CLIENT_ID === undefined || DISCORD_CLIENT_SECRET === undefined) {
 		throw new SignInFailure('Signing in with Discord has not been set up on this site.');
 	}
 
-	return new Discord(DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, redirectUri);
+	return {
+		clientId: DISCORD_CLIENT_ID,
+		clientSecret: DISCORD_CLIENT_SECRET,
+		authorizationEndpoint: AUTHORIZATION_ENDPOINT,
+		tokenEndpoint: TOKEN_ENDPOINT,
+		clientAuth: 'basic'
+	};
 }
 
 /**
@@ -103,20 +122,16 @@ function client(redirectUri: string): Discord {
  * request it rejected, and the request carries the client secret — which is how a credential ends up
  * in a log or on a visitor's screen.
  */
-async function exchange(
-	code: string,
-	verifier: string | null,
-	redirectUri: string
-): Promise<string> {
+async function exchange(callback: Callback): Promise<string> {
 	try {
-		return (await client(redirectUri).validateAuthorizationCode(code, verifier)).accessToken();
+		return (await exchangeCode(app(), callback)).accessToken;
 	} catch (cause) {
 		if (cause instanceof SignInFailure) throw cause;
 
-		// `OAuth2RequestError` means Discord answered and said no — an expired code, a reused one, a
-		// redirect that does not match what the application registered. Anything else is the network.
+		// `refused` means Discord answered and said no — an expired code, a reused one, a redirect
+		// that does not match what the application registered. Anything else is the network.
 		throw new SignInFailure(
-			cause instanceof OAuth2RequestError
+			cause instanceof OAuth2Failure && cause.kind === 'refused'
 				? 'Discord rejected the sign-in. Starting again usually fixes it.'
 				: 'Discord could not be reached. Try again in a moment.'
 		);

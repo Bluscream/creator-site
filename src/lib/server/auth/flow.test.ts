@@ -150,10 +150,11 @@ function stubProvider(overrides: Partial<SignInProvider> = {}): SignInProvider {
 		kind: 'stub',
 		label: 'Stub',
 		usable: () => true,
-		authorize: (state, redirectUri): Authorization => ({
-			url: new URL(`https://provider.example/authorize?state=${state}&redirect=${redirectUri}`),
-			verifier: null
-		}),
+		authorize: (state, redirectUri): Promise<Authorization> =>
+			Promise.resolve({
+				url: new URL(`https://provider.example/authorize?state=${state}&redirect=${redirectUri}`),
+				verifier: null
+			}),
 		identify: () =>
 			Promise.resolve<ProviderIdentity>({
 				provider: 'stub',
@@ -242,60 +243,63 @@ describe('redirectUriFor', () => {
 });
 
 describe('beginSignIn', () => {
-	it('sends the visitor to the provider', () => {
+	it('sends the visitor to the provider', async () => {
 		const { cookies } = jar();
 
-		const url = beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		expect(url.origin).toBe('https://provider.example');
 	});
 
-	it('remembers the flow in a cookie', () => {
+	it('remembers the flow in a cookie', async () => {
 		const { cookies, values } = jar();
 
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		expect(values.has(PENDING_COOKIE)).toBe(true);
 	});
 
-	it('puts the state it generated in both the URL and the cookie', () => {
+	it('puts the state it generated in both the URL and the cookie', async () => {
 		const { cookies, values } = jar();
 
-		const url = beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 		const stored = JSON.parse(values.get(PENDING_COOKIE) ?? '{}') as { state?: string };
 
 		expect(stored.state).toBe(url.searchParams.get('state'));
 	});
 
-	it('generates a different state each time', () => {
+	it('generates a different state each time', async () => {
 		const states = new Set(
-			Array.from({ length: 20 }, () => {
-				const { cookies } = jar();
+			await Promise.all(
+				Array.from({ length: 20 }, async () => {
+					const { cookies } = jar();
+					const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
-				return beginSignIn(
-					stubProvider(),
-					requestFor('/auth/stub/login', cookies)
-				).searchParams.get('state');
-			})
+					return url.searchParams.get('state');
+				})
+			)
 		);
 
 		expect(states.size).toBe(20);
 	});
 
-	it('remembers where the visitor was going', () => {
+	it('remembers where the visitor was going', async () => {
 		const { cookies, values } = jar();
 
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login?next=%2Fadmin%2Flinks', cookies));
+		await beginSignIn(
+			stubProvider(),
+			requestFor('/auth/stub/login?next=%2Fadmin%2Flinks', cookies)
+		);
 
 		expect(JSON.parse(values.get(PENDING_COOKIE) ?? '{}')).toMatchObject({
 			next: '/admin/links'
 		});
 	});
 
-	it('refuses an off-site destination at the point it is stored', () => {
+	it('refuses an off-site destination at the point it is stored', async () => {
 		const { cookies, values } = jar();
 
-		beginSignIn(
+		await beginSignIn(
 			stubProvider(),
 			requestFor('/auth/stub/login?next=https%3A%2F%2Fevil.example', cookies)
 		);
@@ -305,11 +309,11 @@ describe('beginSignIn', () => {
 		});
 	});
 
-	it('marks the pending cookie HttpOnly and Secure', () => {
+	it('marks the pending cookie HttpOnly and Secure', async () => {
 		// It holds the only thing standing between a forged callback and a session.
 		const { cookies, sets } = recordingJar();
 
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		expect(sets[0]?.options).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax' });
 	});
@@ -323,7 +327,7 @@ async function roundTrip(
 	const { cookies, values } = jar();
 	const query = options.next === undefined ? '' : `?next=${encodeURIComponent(options.next)}`;
 
-	const authorizeUrl = beginSignIn(provider, requestFor(`/auth/stub/login${query}`, cookies));
+	const authorizeUrl = await beginSignIn(provider, requestFor(`/auth/stub/login${query}`, cookies));
 	const state = authorizeUrl.searchParams.get('state') ?? '';
 
 	const completed = await completeSignIn(
@@ -364,7 +368,7 @@ describe('completeSignIn', () => {
 	it('marks the session cookie HttpOnly and Secure', async () => {
 		const { cookies, sets } = recordingJar();
 
-		const url = beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 		const state = url.searchParams.get('state') ?? '';
 
 		await completeSignIn(
@@ -395,7 +399,7 @@ describe('completeSignIn', () => {
 		// The whole login-CSRF defence. A third party can make a browser issue the callback; they
 		// cannot read or set this cookie.
 		const { cookies } = jar();
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		await expect(
 			completeSignIn(
@@ -407,7 +411,7 @@ describe('completeSignIn', () => {
 
 	it('issues no session when the state does not match', async () => {
 		const { cookies, values } = jar();
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		await completeSignIn(
 			stubProvider(),
@@ -419,7 +423,7 @@ describe('completeSignIn', () => {
 
 	it('refuses a callback for a different provider than the one that started it', async () => {
 		const { cookies } = jar();
-		const url = beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		const url = await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 		const state = url.searchParams.get('state') ?? '';
 
 		await expect(
@@ -479,7 +483,7 @@ describe('completeSignIn', () => {
 
 	it('reports a declined prompt as a cancellation, not a failure', async () => {
 		const { cookies } = jar();
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies));
 
 		await expect(
 			completeSignIn(stubProvider(), requestFor('/auth/stub/callback?error=access_denied', cookies))
@@ -493,7 +497,7 @@ describe('completeSignIn', () => {
 		const provider = stubProvider({
 			identify: () => Promise.reject(new SignInFailure('nope'))
 		});
-		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies));
+		const url = await beginSignIn(provider, requestFor('/auth/stub/login', cookies));
 		const state = url.searchParams.get('state') ?? '';
 
 		await completeSignIn(
@@ -570,7 +574,7 @@ describe('the link intent', () => {
 		options: { readonly startedBy?: string } = {}
 	) {
 		const { cookies } = jar();
-		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+		const url = await beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
 			intent: 'link',
 			...(options.startedBy === undefined ? {} : { userId: options.startedBy })
 		});
@@ -695,11 +699,11 @@ describe('the link intent', () => {
 		).rejects.toThrow(/already in use/);
 	});
 
-	it('does not remember a user id for an ordinary sign-in', () => {
+	it('does not remember a user id for an ordinary sign-in', async () => {
 		// So a cookie from a sign-in cannot be replayed as a link.
 		const { cookies, values } = jar();
 
-		beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies), {
+		await beginSignIn(stubProvider(), requestFor('/auth/stub/login', cookies), {
 			intent: 'sign-in',
 			userId: 'somebody'
 		});
@@ -764,7 +768,7 @@ describe('the connect intent', () => {
 		const existing = options.as ?? (await roundTrip());
 		const signedIn = existing.completed.principal;
 		const { cookies } = jar();
-		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+		const url = await beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
 			intent: 'connect',
 			userId: options.startedBy ?? signedIn.userId
 		});
@@ -860,7 +864,7 @@ describe('the connect intent', () => {
 	it('refuses when nobody is signed in', async () => {
 		const { cookies } = jar();
 		const provider = granting();
-		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+		const url = await beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
 			intent: 'connect',
 			userId: 'someone'
 		});
@@ -885,7 +889,7 @@ describe('the connect intent', () => {
 
 		if (!other.ok) throw new Error('could not create the second account');
 
-		const url = beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
+		const url = await beginSignIn(provider, requestFor('/auth/stub/login', cookies), {
 			intent: 'connect',
 			userId: other.principal.userId
 		});

@@ -37,6 +37,8 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
+import type { Callback } from './sign-in-provider.js';
+
 const { discordSignIn } = await import('./discord-sign-in.js');
 const { SignInFailure } = await import('./sign-in-provider.js');
 
@@ -106,66 +108,100 @@ describe('usable', () => {
 	});
 });
 
-describe('authorize', () => {
-	it('points at Discord', () => {
-		expect(discordSignIn().authorize('a-state', REDIRECT).url.origin).toBe('https://discord.com');
-	});
+/**
+ * A callback as `flow.ts` builds one.
+ *
+ * The expected state is deliberately the same value the query carries, because this file is not
+ * where that comparison is tested — `flow.ts` compares the callback's state to the cookie's, and
+ * `flow.test.ts` is where a mismatch is proven to be refused.
+ */
+function callback(code = 'a-code'): Callback {
+	return {
+		params: new URLSearchParams({ code, state: 'a-state' }),
+		expectedState: 'a-state',
+		verifier: null,
+		redirectUri: REDIRECT
+	};
+}
 
-	it('carries the state it was given', () => {
-		expect(discordSignIn().authorize('a-state', REDIRECT).url.searchParams.get('state')).toBe(
-			'a-state'
+describe('authorize', () => {
+	it('points at Discord', async () => {
+		expect((await discordSignIn().authorize('a-state', REDIRECT)).url.origin).toBe(
+			'https://discord.com'
 		);
 	});
 
-	it('asks for identify and nothing else', () => {
+	it('carries the state it was given', async () => {
+		expect(
+			(await discordSignIn().authorize('a-state', REDIRECT)).url.searchParams.get('state')
+		).toBe('a-state');
+	});
+
+	it('asks for identify and nothing else', async () => {
 		// Not `guilds`, not `email`. A scope requested is a scope the visitor has to approve and the
 		// application has to be trusted with.
-		expect(discordSignIn().authorize('s', REDIRECT).url.searchParams.get('scope')).toBe('identify');
-	});
-
-	it('sends the redirect it was given rather than one of its own', () => {
-		expect(discordSignIn().authorize('s', REDIRECT).url.searchParams.get('redirect_uri')).toBe(
-			REDIRECT
+		expect((await discordSignIn().authorize('s', REDIRECT)).url.searchParams.get('scope')).toBe(
+			'identify'
 		);
 	});
 
-	it('uses no PKCE verifier, because this is a confidential client', () => {
-		expect(discordSignIn().authorize('s', REDIRECT).verifier).toBeNull();
+	it('sends the redirect it was given rather than one of its own', async () => {
+		expect(
+			(await discordSignIn().authorize('s', REDIRECT)).url.searchParams.get('redirect_uri')
+		).toBe(REDIRECT);
 	});
 
-	it('refuses to build a URL when nothing is configured', () => {
+	it('uses PKCE, and keeps the verifier out of the URL', async () => {
+		// Discord treats PKCE as optional and `arctic` skipped it. Using it anyway costs nothing and
+		// binds the authorization code to this exchange, so a code that leaks through a referrer, a
+		// shared screen or a proxy log cannot be redeemed by whoever picked it up.
+		//
+		// The verifier must not appear in the URL: the whole mechanism is that the challenge travels
+		// through the browser and the verifier does not.
+		const { url, verifier } = await discordSignIn().authorize('s', REDIRECT);
+
+		expect(verifier).not.toBeNull();
+		expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+		expect(url.searchParams.get('code_challenge')).not.toBe(verifier);
+		expect(url.toString()).not.toContain(verifier);
+	});
+
+	it('refuses to build a URL when nothing is configured', async () => {
+		// A rejected promise rather than a synchronous throw, because building the URL became async
+		// when PKCE's code challenge did — `crypto.subtle.digest` is the only SHA-256 these runtimes
+		// agree on. Asserted as a rejection so a caller that forgets to await cannot pass this.
 		env.id = undefined;
 
-		expect(() => discordSignIn().authorize('s', REDIRECT)).toThrow(SignInFailure);
+		await expect(discordSignIn().authorize('s', REDIRECT)).rejects.toBeInstanceOf(SignInFailure);
 	});
 });
 
 describe('identify', () => {
 	it('reports who signed in', async () => {
-		const identity = await discordSignIn().identify('a-code', null, REDIRECT);
+		const identity = await discordSignIn().identify(callback('a-code'));
 
 		expect(identity).toMatchObject({ provider: 'discord', providerUserId: ACCOUNT.id });
 	});
 
 	it('prefers the display name over the username', async () => {
-		expect((await discordSignIn().identify('c', null, REDIRECT)).name).toBe('Someone');
+		expect((await discordSignIn().identify(callback('c'))).name).toBe('Someone');
 	});
 
 	it('falls back to the username when there is no display name', async () => {
 		identityResponse = () => json({ ...ACCOUNT, global_name: null });
 
-		expect((await discordSignIn().identify('c', null, REDIRECT)).name).toBe('someone');
+		expect((await discordSignIn().identify(callback('c'))).name).toBe('someone');
 	});
 
 	it('reports no name at all rather than an empty one', async () => {
 		// `accounts.ts` falls back to the provider's own name, which is better than a blank row.
 		identityResponse = () => json({ ...ACCOUNT, global_name: '', username: '' });
 
-		expect((await discordSignIn().identify('c', null, REDIRECT)).name).toBeUndefined();
+		expect((await discordSignIn().identify(callback('c'))).name).toBeUndefined();
 	});
 
 	it('builds the avatar URL from the id and the hash', async () => {
-		expect((await discordSignIn().identify('c', null, REDIRECT)).avatarUrl).toBe(
+		expect((await discordSignIn().identify(callback('c'))).avatarUrl).toBe(
 			`https://cdn.discordapp.com/avatars/${ACCOUNT.id}/abc123.png?size=64`
 		);
 	});
@@ -173,7 +209,7 @@ describe('identify', () => {
 	it('reports no avatar when there is none', async () => {
 		identityResponse = () => json({ ...ACCOUNT, avatar: null });
 
-		expect((await discordSignIn().identify('c', null, REDIRECT)).avatarUrl).toBeUndefined();
+		expect((await discordSignIn().identify(callback('c'))).avatarUrl).toBeUndefined();
 	});
 
 	it('refuses an avatar hash that is not one', async () => {
@@ -181,50 +217,50 @@ describe('identify', () => {
 		// on trust is a path somebody else chose.
 		identityResponse = () => json({ ...ACCOUNT, avatar: '../../evil' });
 
-		expect((await discordSignIn().identify('c', null, REDIRECT)).avatarUrl).toBeUndefined();
+		expect((await discordSignIn().identify(callback('c'))).avatarUrl).toBeUndefined();
 	});
 
 	it('refuses an id that is not a snowflake', async () => {
 		// It becomes a database key and a URL segment.
 		identityResponse = () => json({ ...ACCOUNT, id: 'not-a-snowflake' });
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 
 	it('refuses a response with no id', async () => {
 		identityResponse = () => json({ username: 'someone' });
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 
 	it('refuses a response that is not JSON', async () => {
 		identityResponse = () => new Response('<html>502</html>', { status: 200 });
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 
 	it('refuses a rejected identity request', async () => {
 		identityResponse = () => json({ message: '401: Unauthorized' }, 401);
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 
 	it('refuses a rejected token exchange', async () => {
 		tokenResponse = () => json({ error: 'invalid_grant' }, 400);
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 
 	it('says starting again usually fixes a rejected exchange, because it usually does', async () => {
 		tokenResponse = () => json({ error: 'invalid_grant' }, 400);
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(/again/);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(/again/);
 	});
 
 	it('survives an unreachable Discord', async () => {
 		vi.stubGlobal('fetch', () => Promise.reject(new Error('ECONNREFUSED 1.2.3.4:443')));
 
-		await expect(discordSignIn().identify('c', null, REDIRECT)).rejects.toThrow(SignInFailure);
+		await expect(discordSignIn().identify(callback('c'))).rejects.toThrow(SignInFailure);
 	});
 });
 
@@ -246,7 +282,7 @@ describe('what a failure message is allowed to contain', () => {
 		tokenResponse = () =>
 			json({ error: 'invalid_client', error_description: 'secret client-secret is wrong' }, 401);
 
-		const message = await messageFor(() => discordSignIn().identify('c', null, REDIRECT));
+		const message = await messageFor(() => discordSignIn().identify(callback('c')));
 
 		expect(message).not.toContain('client-secret');
 		expect(message).not.toContain('invalid_client');
@@ -255,7 +291,7 @@ describe('what a failure message is allowed to contain', () => {
 	it('never repeats an identity response body', async () => {
 		identityResponse = () => json({ message: 'token an-access-token is invalid' }, 401);
 
-		const message = await messageFor(() => discordSignIn().identify('c', null, REDIRECT));
+		const message = await messageFor(() => discordSignIn().identify(callback('c')));
 
 		expect(message).not.toContain('an-access-token');
 	});
@@ -263,7 +299,7 @@ describe('what a failure message is allowed to contain', () => {
 	it('never repeats a network error, which can carry an address', async () => {
 		vi.stubGlobal('fetch', () => Promise.reject(new Error('ECONNREFUSED 10.0.0.5:443')));
 
-		const message = await messageFor(() => discordSignIn().identify('c', null, REDIRECT));
+		const message = await messageFor(() => discordSignIn().identify(callback('c')));
 
 		expect(message).not.toContain('10.0.0.5');
 	});

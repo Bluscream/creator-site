@@ -26,14 +26,31 @@
  * `/oauth2/validate` wants `Authorization: OAuth <token>`; Helix wants `Authorization: Bearer
  * <token>`. The same token, two spellings, and the wrong one is a 401 that reads like a bad
  * credential. It has its own constant here so neither is a literal at a call site.
+ *
+ * ### Two things Twitch does its own way
+ *
+ * Both are declared to `./oauth2.ts` rather than discovered, and both were measured:
+ *
+ * - The client secret goes in the **form body**, not an HTTP Basic header, which is the opposite of
+ *   Discord.
+ * - The token response carries `scope` as a JSON **array**. RFC 6749 §5.1 requires a space-delimited
+ *   string, and a specification-exact client refuses the response outright — so the quirk is declared
+ *   and the array is joined before the response is read.
  */
 
-import { OAuth2RequestError, Twitch } from 'arctic';
 import { z } from 'zod';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from '$app/env/private';
 import type { ProviderIdentity } from '../accounts.js';
+import { OAuth2Failure, authorizationUrl, exchangeCode } from './oauth2.js';
+import type { Callback, OAuth2App } from './oauth2.js';
 import { SignInFailure } from './sign-in-provider.js';
 import type { Authorization, Grant, SignInProvider } from './sign-in-provider.js';
+
+/** Where the visitor approves. */
+const AUTHORIZATION_ENDPOINT = 'https://id.twitch.tv/oauth2/authorize';
+
+/** Where the code is exchanged. */
+const TOKEN_ENDPOINT = 'https://id.twitch.tv/oauth2/token';
 
 /** Whose token is this, and what may it do. */
 const VALIDATE = 'https://id.twitch.tv/oauth2/validate';
@@ -107,21 +124,17 @@ export function twitchSignIn(): SignInProvider {
 
 		usable: () => TWITCH_CLIENT_ID !== undefined && TWITCH_CLIENT_SECRET !== undefined,
 
-		authorize: (state, redirectUri): Authorization => ({
-			// Null verifier: Twitch is a confidential client with a secret and `arctic`'s Twitch
-			// provider takes no code challenge. The `state` parameter is what protects this flow, and
-			// `./flow.ts` is what checks it.
-			url: client(redirectUri).createAuthorizationURL(state, [...SCOPES]),
+		authorize: async (state, redirectUri): Promise<Authorization> => ({
+			// Null verifier: Twitch is a confidential client with a secret and does not require a code
+			// challenge. The `state` parameter is what protects this flow, and `./flow.ts` is what
+			// checks it against the cookie.
+			url: await authorizationUrl(app(), { state, redirectUri, scopes: SCOPES }),
 			verifier: null
 		}),
 
-		identify: async (code, _verifier, redirectUri) => {
-			const { identity } = await exchange(code, redirectUri);
+		identify: async (callback) => (await exchange(callback)).identity,
 
-			return identity;
-		},
-
-		grant: async (code, _verifier, redirectUri) => exchange(code, redirectUri)
+		grant: async (callback) => exchange(callback)
 	};
 }
 
@@ -153,17 +166,27 @@ export async function verifyTwitchToken(token: string): Promise<Grant> {
 }
 
 /**
- * The `arctic` client, built per call.
+ * This application's OAuth configuration.
  *
- * Per call rather than once at module load because the redirect URI depends on the request: this
- * site answers on several hostnames and each registers its own redirect.
+ * Built per call rather than once at module load so that importing this module reads no environment
+ * and an unconfigured install fails where somebody tries to use it, with a sentence about the site
+ * rather than a type error.
  */
-function client(redirectUri: string): Twitch {
+function app(): OAuth2App {
 	if (TWITCH_CLIENT_ID === undefined || TWITCH_CLIENT_SECRET === undefined) {
 		throw new SignInFailure('Signing in with Twitch has not been set up on this site.');
 	}
 
-	return new Twitch(TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, redirectUri);
+	return {
+		clientId: TWITCH_CLIENT_ID,
+		clientSecret: TWITCH_CLIENT_SECRET,
+		authorizationEndpoint: AUTHORIZATION_ENDPOINT,
+		tokenEndpoint: TOKEN_ENDPOINT,
+
+		// Not Basic. See the note at the top.
+		clientAuth: 'body',
+		quirks: { spaceDelimitedScope: true }
+	};
 }
 
 /**
@@ -173,30 +196,33 @@ function client(redirectUri: string): Twitch {
  * a link stores cannot drift apart — and so the code is exchanged exactly once either way, which
  * matters because a second attempt with the same code is rejected.
  */
-async function exchange(code: string, redirectUri: string): Promise<Grant> {
+async function exchange(callback: Callback): Promise<Grant> {
 	let tokens;
 
 	try {
-		tokens = await client(redirectUri).validateAuthorizationCode(code);
+		tokens = await exchangeCode(app(), callback);
 	} catch (cause) {
 		if (cause instanceof SignInFailure) throw cause;
 
 		// Never the response body: a failed token exchange can echo the request it rejected, and the
 		// request carries the client secret.
 		throw new SignInFailure(
-			cause instanceof OAuth2RequestError
+			cause instanceof OAuth2Failure && cause.kind === 'refused'
 				? 'Twitch rejected the sign-in. Starting again usually fixes it.'
 				: 'Twitch could not be reached. Try again in a moment.'
 		);
 	}
 
-	const accessToken = tokens.accessToken();
-	const validation = await validate(accessToken);
+	const validation = await validate(tokens.accessToken);
 
 	return {
-		identity: await decorate(validation, accessToken),
-		accessToken,
-		refreshToken: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
+		identity: await decorate(validation, tokens.accessToken),
+		accessToken: tokens.accessToken,
+		refreshToken: tokens.refreshToken,
+
+		// `/oauth2/validate`'s answer, not the token response's. It is the same token either way, and
+		// validate is the endpoint that distinguishes "does not expire" from "expires in zero
+		// seconds" — a distinction the grant response does not make.
 		expiresAt: validation.expiresAt,
 		scopes: validation.scopes
 	};

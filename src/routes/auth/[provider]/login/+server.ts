@@ -15,7 +15,7 @@ import { INTENTS, beginSignIn } from '#lib/server/auth/flow.js';
 import { signInProvider } from '#lib/server/auth/sign-in-registry.js';
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = (event) => {
+export const GET: RequestHandler = async (event) => {
 	const provider = signInProvider(event.params.provider);
 	const { principal } = event.locals;
 
@@ -34,5 +34,5 @@ export const GET: RequestHandler = (event) => {
 	const options =
 		intent === 'sign-in' || principal === null ? {} : { intent, userId: principal.userId };
 
-	redirect(303, beginSignIn(provider, event, options).toString());
+	redirect(303, (await beginSignIn(provider, event, options)).toString());
 };

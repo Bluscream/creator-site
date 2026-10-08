@@ -61,12 +61,12 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"dependencies": {
-		"arctic": "^3.7.0",
 		"better-sqlite3": "^13.0.2",
 		"better-sse": "^0.16.1",
 		"culori": "^4.0.2",
 		"drizzle-orm": "^0.45.2",
 		"feedsmith": "^3.0.1",
+		"oauth4webapi": "^3.8.8",
 		"pino": "^10.4.0",
 		"proper-lockfile": "^4.1.2",
 		"read-last-lines": "^1.10.0",

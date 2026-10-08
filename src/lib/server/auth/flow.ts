@@ -34,7 +34,7 @@
  * same rule the PHP original applied, for the same reason.
  */
 
-import { generateState } from 'arctic';
+import { oauthState } from './oauth2.js';
 import type { Cookies } from '@sveltejs/kit';
 import { DISCORD_REDIRECT_URI } from '$app/env/private';
 import { linkIdentity, signIn } from '../accounts.js';
@@ -46,7 +46,7 @@ import type { LinkMethod } from '../db/schema.js';
 import { link as linkConnection } from '../connections.js';
 import type { LinkRefusal } from '../connections.js';
 import { SignInFailure } from './sign-in-provider.js';
-import type { Grant, SignInProvider } from './sign-in-provider.js';
+import type { Callback, Grant, SignInProvider } from './sign-in-provider.js';
 import type { ProviderIdentity } from '../accounts.js';
 
 /**
@@ -170,14 +170,14 @@ export function redirectUriFor(kind: string, url: URL): string {
  *
  * @returns the provider's authorization URL
  */
-export function beginSignIn(
+export async function beginSignIn(
 	provider: SignInProvider,
 	event: FlowRequest,
 	options: { readonly intent?: Intent; readonly userId?: string } = {}
-): URL {
-	const state = generateState();
+): Promise<URL> {
+	const state = oauthState();
 	const redirectUri = redirectUriFor(provider.kind, event.url);
-	const { url, verifier } = provider.authorize(state, redirectUri);
+	const { url, verifier } = await provider.authorize(state, redirectUri);
 	const intent = options.intent ?? 'sign-in';
 
 	remember(event.cookies, {
@@ -240,13 +240,26 @@ export async function completeSignIn(
 
 	// One exchange, whichever intent this is. An authorization code is single-use, so asking for the
 	// identity and then for the grant would have the provider reject the second call.
+	// The whole callback query, not just the code. `./oauth2.ts` explains why: the library will not
+	// accept parameters that did not pass its own validator, and that validator also rejects an
+	// `error=` response and duplicated parameters, neither of which the comparison above looks at.
+	//
+	// `expectedState` is the cookie's state, which is the one that means anything — handing the
+	// library the callback's own state would have it compare a value against itself.
+	const callback: Callback = {
+		params: event.url.searchParams,
+		expectedState: pending.state,
+		verifier: pending.verifier,
+		redirectUri
+	};
+
 	if (pending.intent === 'connect') {
-		const grant = await grantOf(provider, code, pending.verifier, redirectUri);
+		const grant = await grantOf(provider, callback);
 
 		return { principal: connect(grant, pending, signedIn), next: pending.next, intent: 'connect' };
 	}
 
-	const identity = await provider.identify(code, pending.verifier, redirectUri);
+	const identity = await provider.identify(callback);
 
 	if (pending.intent === 'link') {
 		return { principal: link(identity, pending, signedIn), next: pending.next, intent: 'link' };
@@ -309,16 +322,11 @@ function link(identity: ProviderIdentity, pending: Pending, signedIn: Principal 
  * display name and an avatar — which is all the socials capability wants — and no secret is written
  * to disk at all.
  */
-async function grantOf(
-	provider: SignInProvider,
-	code: string,
-	verifier: string | null,
-	redirectUri: string
-): Promise<Grant> {
-	if (provider.grant !== undefined) return provider.grant(code, verifier, redirectUri);
+async function grantOf(provider: SignInProvider, callback: Callback): Promise<Grant> {
+	if (provider.grant !== undefined) return provider.grant(callback);
 
 	return {
-		identity: await provider.identify(code, verifier, redirectUri),
+		identity: await provider.identify(callback),
 		accessToken: null,
 		refreshToken: null,
 		expiresAt: null,

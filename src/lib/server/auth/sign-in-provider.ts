@@ -38,6 +38,23 @@ export interface Authorization {
 	readonly verifier: string | null;
 }
 
+/**
+ * What a provider's callback produced.
+ *
+ * The whole query rather than just the code, because `oauth4webapi` will not accept callback
+ * parameters that did not pass through its own validator — which is what makes skipping the state
+ * comparison impossible rather than merely inadvisable, and which is also what turns
+ * `error=access_denied` into a refusal rather than a missing code noticed later.
+ *
+ * `expectedState` is the state from the **cookie**, not from the callback. The library can only
+ * compare the value it is handed, so handing it the callback's own state would prove nothing; the
+ * check that binds the response to this browser is `./flow.ts`'s, and this is how its answer reaches
+ * the exchange.
+ */
+export type { Callback } from './oauth2.js';
+
+import type { Callback } from './oauth2.js';
+
 /** One way of signing in. */
 export interface SignInProvider {
 	/**
@@ -59,8 +76,13 @@ export interface SignInProvider {
 	 */
 	usable(): boolean;
 
-	/** Where to send the visitor. `state` is generated and remembered by the caller. */
-	authorize(state: string, redirectUri: string): Authorization;
+	/**
+	 * Where to send the visitor. `state` is generated and remembered by the caller.
+	 *
+	 * Asynchronous because PKCE's code challenge is a SHA-256 of the verifier, and every runtime this
+	 * targets offers that only through `crypto.subtle`, which is async.
+	 */
+	authorize(state: string, redirectUri: string): Promise<Authorization>;
 
 	/**
 	 * Turns the code the provider sent back into who signed in.
@@ -69,7 +91,7 @@ export interface SignInProvider {
 	 * provider's response body into the message: a failed token exchange can echo the request, and
 	 * the request contains the client secret.
 	 */
-	identify(code: string, verifier: string | null, redirectUri: string): Promise<ProviderIdentity>;
+	identify(callback: Callback): Promise<ProviderIdentity>;
 
 	/**
 	 * The same exchange, but keeping the credential — for linking an account rather than signing in.
@@ -82,7 +104,7 @@ export interface SignInProvider {
 	 * Where it *is* implemented, it must exchange the code once. Calling {@link identify} as well
 	 * would present the same authorization code twice, which every provider rejects the second time.
 	 */
-	grant?(code: string, verifier: string | null, redirectUri: string): Promise<Grant>;
+	grant?(callback: Callback): Promise<Grant>;
 }
 
 /**
