@@ -27,6 +27,13 @@
  * | `twitch`  | the official Helix API — videos and clips           | two credentials |
  * | `bluesky` | the public AppView, unauthenticated                 | nothing         |
  * | `tiktok`  | the page TikTok renders for embedding, which is server-rendered with the post list | nothing |
+ * | `kick`    | Kick's own maintained GrayJay plugin, run in a WebAssembly sandbox | nothing |
+ *
+ * `kick` is the unusual one. Kick documents no public API for past broadcasts and fronts its own
+ * client's endpoint with Cloudflare, so the route that works is the one the GrayJay app uses — and
+ * borrowing the official plugin means the Kick-specific knowledge is maintained by people who watch
+ * Kick change, rather than being a scraper here that breaks quietly. See `kick-source.ts` for what
+ * that costs.
  *
  * `tiktok` is the surprising one, and it is the cheapest of the lot: one unauthenticated GET, no
  * key, no cookie, no signing. The endpoints you would reach for first are all worse — the official
@@ -52,7 +59,14 @@
  * A tuple rather than an array so zod can build an enum from it and a kind that is not one of these
  * is a validation failure rather than a lookup that returns nothing at runtime.
  */
-export const POST_SOURCE_KINDS = ['feed', 'youtube', 'twitch', 'bluesky', 'tiktok'] as const;
+export const POST_SOURCE_KINDS = [
+	'feed',
+	'youtube',
+	'twitch',
+	'bluesky',
+	'tiktok',
+	'kick'
+] as const;
 
 /** One of {@link POST_SOURCE_KINDS}. */
 export type PostSourceKind = (typeof POST_SOURCE_KINDS)[number];

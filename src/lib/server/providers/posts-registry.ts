@@ -30,6 +30,7 @@
 
 import { blueskySourceProvider } from './bluesky-source.js';
 import { feedSourceProvider } from './feed-source.js';
+import { kickSourceProvider } from './kick-source.js';
 import { tiktokSourceProvider } from './tiktok-source.js';
 import { twitchSourceProvider } from './twitch-source.js';
 import { youtubeSourceProvider } from './youtube-source.js';
@@ -43,7 +44,8 @@ const READERS: Readonly<Partial<Record<PostSourceKind, PostsSourceProvider>>> = 
 	youtube: youtubeSourceProvider,
 	bluesky: blueskySourceProvider,
 	tiktok: tiktokSourceProvider,
-	twitch: twitchSourceProvider
+	twitch: twitchSourceProvider,
+	kick: kickSourceProvider
 };
 
 /**

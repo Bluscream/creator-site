@@ -162,6 +162,7 @@ registry maps a kind to the reader for it rather than choosing one
 | `bluesky` | the public AppView, unauthenticated                    | nothing         | **built**, run live     |
 | `tiktok`  | the page TikTok renders for embedding, server-rendered | nothing         | **built**, run live     |
 | `twitch`  | the official Helix API — videos and clips              | two credentials | **built**, not run live |
+| `kick`    | Kick's own maintained GrayJay plugin, sandboxed        | nothing         | **built**, run live     |
 
 "Run live" means the reader has been pointed at the real endpoint and its output checked, which is
 how three separate bugs in this table's readers were found. `twitch` is the exception: it needs an
@@ -188,6 +189,26 @@ own embed page. It is the most fragile reader here: a layout change upstream bre
 it fails that one source with a message naming both possible causes rather than failing the feed. It
 also derives each date from the id, because the payload carries no timestamp at all — and that is
 what re-sorts the pinned videos TikTok lists first and does not mark.
+
+**Kick borrows a maintained reader instead of writing one.** Kick documents no public API for a
+channel's past broadcasts, and the endpoint its own client calls sits behind Cloudflare, which
+answers a plain request with a challenge page. The route that works is the one the
+[GrayJay](https://grayjay.app) app uses — so `kick` loads the official Kick plugin and asks it,
+rather than growing a scraper here that would break quietly and need watching.
+
+The plugin is third-party JavaScript, so it runs in a WebAssembly sandbox with no Node globals and
+no network except through this project's own `context.fetch`:
+[`grayjay-plugin-host`](https://github.com/Bluscream/grayjay-plugin-host), a library extracted from
+this project's research and published separately because it is useful to anyone on Node. What it
+costs is a sandbox and two extra fetches per read, which is measured against the refresh interval
+rather than against a page view. The plugin is fetched from Kick's published url at run time and
+never vendored, which is also what keeps it current — and the trade is deliberate: the
+Kick-specific knowledge is maintained by people who watch Kick change.
+
+Its live tests are opt-in behind `RUN_LIVE=1`, because they reach both Kick and the plugin's own
+host. That is where the one bug this reader has had so far was found: the host was filling GrayJay's
+value classes from the wrong argument shape, so every post arrived with a corrupt id, author and
+thumbnail while its name and url looked perfectly fine.
 
 **Twitch needs two credentials, and reports itself unusable without them.** `TWITCH_CLIENT_ID` and
 `TWITCH_CLIENT_SECRET`, from an application at [dev.twitch.tv](https://dev.twitch.tv/console/apps).

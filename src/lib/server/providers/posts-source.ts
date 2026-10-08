@@ -37,8 +37,13 @@ import type { ResolvedSource } from './post.js';
  * former is rendered.
  */
 export class SourceFailure extends Error {
-	constructor(message: string) {
-		super(message);
+	/**
+	 * @param options carries `cause` where there is an underlying error worth keeping. The message is
+	 *   the only part shown to an admin; the cause is for the log, and is why a provider can name a
+	 *   platform plainly without throwing away what actually went wrong.
+	 */
+	constructor(message: string, options?: { readonly cause?: unknown }) {
+		super(message, options);
 		this.name = 'SourceFailure';
 	}
 }
