@@ -33,6 +33,7 @@ describe('choosing a plugin for a target', () => {
 		['a full url', 'https://www.dailymotion.com/someone', 'Dailymotion'],
 		['no scheme', 'odysee.com/@someone', 'Odysee'],
 		['a bare host', 'soundcloud.com/someone', 'SoundCloud'],
+		['a host with a www prefix', 'https://www.nicovideo.jp/user/1', 'Niconico'],
 		['a subdomain', 'https://www.bitchute.com/channel/x', 'Bitchute'],
 		['a host that is an exact entry', 'https://media.ccc.de/b/conferences/x', 'media.ccc.de'],
 		['mixed case', 'HTTPS://WWW.NEBULA.TV/someone', 'Nebula']
@@ -264,6 +265,14 @@ describe('naming a channel from its url', () => {
  * **It will flake occasionally.** It reaches seven third-party platforms, so a single run failing on
  * one of them means a network hiccup rather than a regression — one such failure was seen in seven
  * runs here. Re-run before believing it; if the same platform fails twice, that is the signal.
+ *
+ * One flake is known and is *not* a hiccup: SoundCloud's plugin scrapes a `client_id` out of
+ * `m.soundcloud.com/discover` during its own `enable`, and SoundCloud sometimes serves a build of
+ * that page without one. It then fails at load with `Could not find client_id` — repeatably, for as
+ * long as that window lasts, which was three runs in a row here before four clean ones. The
+ * conclusion to resist is that the host library regressed: nothing on this side is involved, and
+ * the table entry is still a true claim. "Fails twice" is the right signal for the other seven, but
+ * for SoundCloud it has to be "fails later as well".
  */
 const live = process.env.RUN_LIVE === '1' ? describe : describe.skip;
 
@@ -289,7 +298,10 @@ live('every plugin in the table', () => {
 		['media.ccc.de', 'https://media.ccc.de/c/38c3'],
 		// Federated, and the one entry that needs `allowUrls: ["everywhere"]` to work at all — the
 		// host library was silently refusing every request it made until that was recognised.
-		['PeerTube', 'https://peertube.futo.org/video-channels/futo']
+		['PeerTube', 'https://peertube.futo.org/video-channels/futo'],
+		// Needs `utility.toBase64` and `utility.md5String` in the host to sign its requests; without
+		// them it loaded and returned nothing, which is why it was wrongly excluded at first.
+		['Niconico', 'https://www.nicovideo.jp/user/92438734']
 	])(
 		'%s reads a channel',
 		async (name, channel) => {

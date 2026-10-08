@@ -106,6 +106,11 @@ export const PLUGINS: readonly {
 		matches: (url) => /^\/video-channels\/[^/]+\/?$/.test(url.pathname)
 	},
 	{
+		name: 'Niconico',
+		manifest: 'https://plugins.grayjay.app/Niconico/NiconicoConfig.json',
+		hosts: ['nicovideo.jp']
+	},
+	{
 		// Not published through `plugins.grayjay.app`, which is ordinary: plenty of plugins in the
 		// index are hosted by whoever wrote them.
 		name: 'media.ccc.de',
@@ -120,16 +125,18 @@ export const PLUGINS: readonly {
 // - Rumble declares the `HttpImp` package, so the host refuses it by name. TLS fingerprint
 //   impersonation needs a stack presenting a browser's exact ClientHello, which Node has not got,
 //   so this one cannot be made to work here at any version.
-// - Niconico loads and negotiates a feed type but returned nothing for the channel tried. A table
-//   entry is a claim that a platform can be read, and listing a plugin whose channel reads come
-//   back empty would offer an admin a source that silently contributes nothing — the exact failure
-//   this project goes out of its way to avoid everywhere else.
+//   It is the only exclusion here that is genuinely permanent.
 //
-// PeerTube was in this list and should not have been. It was failing for two reasons at once: the
-// host library was not honouring `allowUrls: ["everywhere"]`, so every request it made was refused,
-// and the channel urls tried happened to have no videos on them. Both are fixed, and it is in the
-// table above — which is the argument for revisiting an exclusion rather than treating it as
-// settled.
+// PeerTube and Niconico were both on this list for "loads but returns nothing", and both were
+// wrong. PeerTube was failing because the host library did not honour `allowUrls: ["everywhere"]`,
+// so every request it made came back refused; Niconico because `utility.toBase64` and
+// `utility.md5String` did not exist there, so the signing it does returned undefined. Each was
+// also tried against a channel that happened to have no videos, which made the wrong conclusion
+// look confirmed.
+//
+// The part worth keeping: "returns nothing" is a symptom with several causes, and at least one of
+// them is usually on this side of the boundary. An exclusion on that basis is a note to come back
+// to, not a finding.
 
 /**
  * The plugin that reads a target, or null when none of them does.
