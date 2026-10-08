@@ -3,10 +3,10 @@
  *
  * The seam before this one was `./sign-in-provider.ts`, and it answered one question: *how do I sign
  * somebody in with this?* That was the right seam while signing in was the only thing a platform was
- * for. It is the wrong one now, because the direction recorded in `.references/LINKED_ACCOUNTS.md`
- * is that **one link serves everything** — signing in, the credentials the post/chat/live readers
- * need, and the "socials" the public page shows. A platform that can do three of those and not the
- * fourth has to be able to say so, and a page offering a link has to be able to ask.
+ * for. It is the wrong one now, because the design this project settled on is that **one link serves
+ * everything** — signing in, the credentials the post/chat/live readers need, and the "socials" the
+ * public page shows. A platform that can do three of those and not the fourth has to be able to say
+ * so, and a page offering a link has to be able to ask.
  *
  * So a platform is described here, once, and the sign-in provider becomes one *part* of that
  * description rather than the whole of it.

@@ -15,6 +15,17 @@ import type * as LogModuleShape from '#lib/server/log.js';
 
 type LogModule = typeof LogModuleShape;
 
+/**
+ * Longer than the 5 s default, for the same reason as `posts.test.ts`.
+ *
+ * Every case here calls `vi.resetModules()` and re-imports, and several then poll a file for lines
+ * to appear. `posts.test.ts` was observed timing out at exactly 5000 ms under `npm run gate` — only
+ * there, never in a bare `test:unit` run — because the re-import pays a cold transform while a build
+ * and the browser tests compete for cores. This file has not been seen to flake, but it is the same
+ * hazard, and fixing one of two identical cases is how the other one gets found the hard way.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 let directory: string;
 
 /**

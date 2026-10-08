@@ -20,6 +20,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Cache } from './cache.js';
 import type { ContentPiece } from '../posts.js';
 
+/**
+ * Longer than the 5 s default, because every test here re-imports the module under test.
+ *
+ * `freshPosts()` calls `vi.resetModules()` and imports `./posts.js` again, which re-transforms its
+ * whole graph. On an idle machine that is milliseconds; under `npm run gate`, with a build and the
+ * browser tests competing for cores, the first test in the file paid the cold transform cost and
+ * timed out at exactly 5000 ms — a flake that showed up only in the gate and never in a bare
+ * `test:unit` run, which is the worst kind to leave alone.
+ *
+ * Raised here rather than globally: a timeout is a budget, and the rest of the suite should keep the
+ * tight one so a genuinely hung test still fails fast.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 let directory: string;
 let cache: Cache;
 

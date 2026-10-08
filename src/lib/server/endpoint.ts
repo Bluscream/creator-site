@@ -17,7 +17,10 @@
  * - **Key order.** `ok` and `configured` come first, the payload next, `generated_at` last.
  *   Irrelevant to a JSON parser, and exactly what makes a recorded-response diff readable.
  *
- * The recorded PHP responses live in `.references/php-api/` and the contract tests read them.
+ * The PHP responses were recorded while porting, and what the contract tests actually read is
+ * `fixtures/php-feed-keys.json` — the key sets extracted from those recordings and committed. The
+ * recordings themselves are not in the repository, so a test that needed them could not run on a
+ * fresh clone; the extracted fixture can.
  */
 
 import { ServiceFailure } from '#lib/server/failure.js';

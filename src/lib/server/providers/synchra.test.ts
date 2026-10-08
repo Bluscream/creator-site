@@ -284,8 +284,10 @@ describe('matching the PHP response shape', () => {
 	 * is a recording — so the divergence is stated here instead, which keeps an *accidental* change
 	 * to the response shape a failing test while an intentional one has to be written down.
 	 *
-	 * The cutover consequence, noted in `.references/NODE_REWRITE.md`: the chat overlay's url moves
-	 * to the Node route together with the page that reads it, not independently of it.
+	 * The consequence for anybody migrating from the PHP original: the chat overlay's url moves to
+	 * the Node route together with the page that reads it, not independently of it. There is no
+	 * intermediate state in which both clients are satisfied by one endpoint, and no compatibility
+	 * shim was written — the old page keeps its own endpoint until it is deleted.
 	 */
 	const MESSAGE_RENAMES = {
 		gone: ['avatar', 'badges', 'colour', 'created_at', 'kind', 'profile', 'provider', 'viewer'],
