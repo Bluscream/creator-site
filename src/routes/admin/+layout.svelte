@@ -36,6 +36,7 @@
 		{ href: '/admin', label: m.admin_title() },
 		{ href: '/admin/account', label: m.admin_nav_account() },
 		...(data.canSeePeople ? [{ href: '/admin/people', label: m.admin_nav_people() }] : []),
+		...(data.canSeeMetrics ? [{ href: '/admin/metrics', label: m.admin_nav_metrics() }] : []),
 		...(data.canSeeBackup ? [{ href: '/admin/backup', label: m.admin_nav_backup() }] : [])
 	]);
 

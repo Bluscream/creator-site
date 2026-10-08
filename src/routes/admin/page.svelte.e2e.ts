@@ -100,7 +100,11 @@ test.describe('every admin page is closed', () => {
 		{ path: '/admin', action: '' },
 		{ path: '/admin/account', action: '?/endOthers' },
 		{ path: '/admin/people', action: '' },
-		{ path: '/admin/backup', action: '?/inspect' }
+		{ path: '/admin/backup', action: '?/inspect' },
+
+		// No actions of its own — it is read-only — so a bare POST is the right probe. The guard is
+		// on the load, which is what a page with nothing to submit still has to get right.
+		{ path: '/admin/metrics', action: '' }
 	];
 
 	test('refuses a backup download to nobody, without writing one', async ({ baseURL, request }) => {

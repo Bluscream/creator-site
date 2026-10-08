@@ -59,6 +59,7 @@ const NAMESPACES = new Set([
 	'home',
 	'links',
 	'locale',
+	'metrics',
 	'nav',
 	'setup'
 ]);
@@ -77,7 +78,11 @@ const INTENTIONALLY_IDENTICAL = new Set<string>([
 	// Both are the German words too. "Administrator" and "Moderator" are the terms German uses for
 	// these roles, and inventing a different one would be less clear rather than more translated.
 	'de:admin_role_admin',
-	'de:admin_role_moderator'
+	'de:admin_role_moderator',
+
+	// German uses the English word for this one. "Gefällt-mir-Angaben" is what Facebook calls it
+	// and what nobody says; every German-language creator dashboard says "Likes".
+	'de:metrics_likes'
 ]);
 
 const settingsSchema = z.object({

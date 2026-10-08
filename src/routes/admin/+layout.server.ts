@@ -28,6 +28,10 @@ export const load: LayoutServerLoad = ({ locals, url }) => {
 		// linked account's stored credentials, and a restore replaces all of it.
 		canSeeBackup: atLeast(principal.role, 'owner'),
 
+		// The numbers are `admin` rather than `owner`: business figures, not secrets, and an admin
+		// who runs the channel's day to day needs them.
+		canSeeMetrics: atLeast(principal.role, 'admin'),
+
 		// Where a sign-out from the admin navigation should land. Not the current page, which needs a
 		// session to view: signing out and being bounced to a sign-in page reads like the sign-out
 		// failed.

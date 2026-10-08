@@ -177,21 +177,26 @@ This is software other people install, and **most of them will not have an accou
 service this developer uses.** So every capability that reaches a visitor is an interface, and the
 service behind it is a deployment's choice.
 
-| capability | implementations that exist or are planned                                |
-| ---------- | ------------------------------------------------------------------------ |
-| `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast    |
-| `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat             |
-| `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall |
-| `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver               |
-| `posts`    | **configured sources** (below) · an aggregator such as Phyllo or Juicer  |
+| capability | implementations that exist or are planned                                              |
+| ---------- | -------------------------------------------------------------------------------------- |
+| `live`     | **Synchra** · Restream · Twitch Helix · YouTube Data · Kick · Owncast                  |
+| `chat`     | **Synchra** · Restream · Twitch EventSub · YouTube live chat                           |
+| `activity` | **Synchra** · StreamElements · Streamlabs · Ko-fi · Patreon · Fourthwall               |
+| `events`   | **Synchra gateway** · Twitch EventSub · a webhook receiver                             |
+| `posts`    | **configured sources** (below) · an aggregator such as Phyllo or Juicer                |
+| `metrics`  | **Bluesky's public profile** · each platform's analytics API · a third-party collector |
 
-### Posts are the exception: a second seam, by source kind
+### Posts and metrics are the exception: a second seam, by source kind
 
 The other capabilities have one answer per deployment — there is a single answer to "am I live".
 Posts do not: an installation reads several platforms at once and the point is that a creator mixes
 them. So beneath the capability there is a second seam whose unit is a **source kind**, and the
 registry maps a kind to the reader for it rather than choosing one
 (`src/lib/server/providers/posts-source.ts`).
+
+Metrics work the same way and over the same configured sources
+(`src/lib/server/providers/metrics-source.ts`), for the same reason: a creator reads numbers from
+every platform they are on, not from one.
 
 | kind      | how it is read                                                                               | needs           | state                   |
 | --------- | -------------------------------------------------------------------------------------------- | --------------- | ----------------------- |
@@ -713,6 +718,39 @@ choice:
 - **TypeScript is pinned to 6.x.** TypeScript 7 breaks SvelteKit's `write_tsconfig` (it reaches for
   `ts.sys.readFile`) and ESLint's module loading. Revisit once both support it.
 - **Vitest is pinned to 4.x**, because `vitest-browser-svelte` still peers on `vitest@^4`.
+
+## Metrics: a provider seam, and one admin-only page
+
+Anything that reports how the channels are doing is a `MetricsSourceProvider`, over the **same
+configured sources** as the feed — a creator who has said "this is my Bluesky account" does not say
+it again. `/admin/metrics` consolidates them: everything together, then platform by platform.
+
+**Admin-only, no API surface, no public route.** These are business figures, and the aggregate is a
+picture the creator did not publish even when every number in it was already findable somewhere.
+
+Four things it refuses to get wrong:
+
+- **"Views" is not one number.** A platform may report views ever, views in the last 28 days, or
+  viewers right now. Every reading carries a window, and the overall view adds only readings that
+  agree on the metric _and_ the window _and_ the period length — so a platform reporting a window
+  nothing else does gets its own row rather than being folded into a total that is not any
+  quantity at all.
+- **Reported and derived are different claims.** A reported reading is the platform's own figure. A
+  derived one is worked out here from posts already fetched for the feed, which covers whatever
+  happened to be on the page that was fetched — a window nobody chose and nobody can state. Derived
+  readings are marked `complete: false` and the page says so. They exist because for most platforms
+  today they are the only numbers there are, and a page with nothing on it teaches nobody anything.
+- **A missing count is not zero.** A platform that publishes no view count contributes no reading,
+  because "nobody watched" and "nobody says" are different facts and only one of them is bad news.
+- **A total of follower counts says that it double-counts people.** Somebody who follows on two
+  platforms is two followers in a sum, and that is a number a creator might repeat in a sponsorship
+  conversation.
+
+Today **Bluesky** is the only platform read for real: `app.bsky.actor.getProfile` is served
+unauthenticated, which also makes it the one reader that works on a fan's install. Every other kind
+is in the registry's planned table with a sentence saying what it is waiting for — usually the
+creator's account being linked — rather than being absent, because a configured source silently
+missing from this page looks exactly like a platform with nothing to report.
 
 ## Backup and restore: one file, and nothing half-applied
 
