@@ -7,7 +7,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { handleOf, pageOf, postedAt, stateIn, tiktokSourceProvider } from './tiktok-source.js';
+import {
+	expiryOf,
+	handleOf,
+	pageOf,
+	postedAt,
+	stateIn,
+	tiktokSourceProvider
+} from './tiktok-source.js';
 import { memoryStore } from '#lib/server/fixtures/source-context.js';
 import type { ResolvedSource } from './post.js';
 import { SourceFailure } from './posts-source.js';
@@ -81,6 +88,36 @@ function answering(body: string, status = 200): SourceContext & { readonly urls:
 	};
 }
 
+/**
+ * A context that answers the embed page and the oEmbed endpoint differently.
+ *
+ * Needed because the failure path asks oEmbed a second question — "does this account exist" — and a
+ * stub that answered both requests identically could not tell the two diagnoses apart. Which is
+ * precisely the thing worth testing: the message an admin reads depends entirely on this second
+ * answer, and a stub that collapsed them would have reported the old hedge as a pass.
+ */
+function routing(
+	embedStatus: number,
+	embedBody: string,
+	oembedStatus: number
+): SourceContext & { readonly urls: string[] } {
+	const urls: string[] = [];
+
+	return {
+		urls,
+		store: memoryStore(),
+		fetch: (url: string) => {
+			urls.push(url);
+
+			const oembed = url.startsWith('https://www.tiktok.com/oembed');
+
+			return Promise.resolve(
+				new Response(oembed ? '{}' : embedBody, { status: oembed ? oembedStatus : embedStatus })
+			);
+		}
+	};
+}
+
 describe('reading an account’s videos', () => {
 	it('asks the embed page for the handle', async () => {
 		const context = answering(embed([video(NEWEST)]));
@@ -103,16 +140,105 @@ describe('reading an account’s videos', () => {
 			media: [
 				{
 					url: `https://p16-common-sign.tiktokcdn-eu.com/${NEWEST}.image?x-expires=1791550800`,
-					kind: 'image'
+					kind: 'image',
+					expiresAt: 1791550800,
+					width: 576,
+					height: 1024
 				}
 			],
 			kind: 'video',
 			at: '2026-10-01T13:31:57.000Z',
 			duration: null,
-			views: null,
+			views: 3464,
 			live: false,
-			author: { name: 'Someone' }
+			author: { name: 'Someone', profileUrl: 'https://www.tiktok.com/@someone' }
 		});
+	});
+
+	it('takes the play count, which is the only engagement number the page carries', async () => {
+		// It was being parsed and dropped. `ContentPiece.views` is nullable and a renderer treats null
+		// as "the platform does not say", so leaving it null here was asserting something untrue.
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(embed([video(NEWEST, { playCount: 120_345 })]))
+		);
+
+		expect(post?.views).toBe(120_345);
+	});
+
+	it('takes the cover’s expiry from the cover’s own url', async () => {
+		// Not from `imageTtl`, which is a lifetime assumed for the whole platform. The url states when
+		// it dies, so a stale post can drop exactly the picture that has stopped working and keep the
+		// rest — which is the entire reason `Media.expiresAt` exists.
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(
+				embed([video(NEWEST, { coverUrl: 'https://cdn.example/a.image?x-expires=1800000000' })])
+			)
+		);
+
+		expect(post?.media[0]?.expiresAt).toBe(1_800_000_000);
+	});
+
+	it('leaves the expiry absent when the cover url does not carry one', async () => {
+		// Absent rather than zero. A cover with no stated expiry has not expired, and a post whose
+		// picture was treated as already dead would render as text for no reason.
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(embed([video(NEWEST, { coverUrl: 'https://cdn.example/a.image' })]))
+		);
+
+		expect(post?.media[0]).not.toHaveProperty('expiresAt');
+	});
+
+	it('sizes the picture from the video, so a portrait row reserves the right box', async () => {
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(embed([video(NEWEST, { width: 720, height: 1280 })]))
+		);
+
+		expect(post?.media[0]?.width).toBe(720);
+		expect(post?.media[0]?.height).toBe(1280);
+	});
+
+	it('gives no dimensions at all when the page states only one of them', async () => {
+		// A width without a height gives a layout nothing to reserve: it would have to guess the other,
+		// which is the reflow the fields exist to prevent.
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(embed([video(NEWEST, { width: 720, height: undefined })]))
+		);
+
+		expect(post?.media[0]).not.toHaveProperty('width');
+		expect(post?.media[0]).not.toHaveProperty('height');
+	});
+
+	it('links the author to their profile but never to their signed avatar', async () => {
+		// `avatarThumbUrl` is on the page and is deliberately not taken: it is signed with an expiry
+		// and `Actor` has nowhere to record one, so a cached post would hold an avatar that 404s with
+		// nothing able to notice. The profile url is unsigned and permanent.
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(
+				embed([video(NEWEST)], {
+					uniqueId: 'someone',
+					nickname: 'Someone',
+					avatarThumbUrl: 'https://cdn.example/avatar.jpeg?x-expires=1800000000'
+				})
+			)
+		);
+
+		expect(post?.author?.profileUrl).toBe('https://www.tiktok.com/@someone');
+		expect(post?.author).not.toHaveProperty('avatarUrl');
+	});
+
+	it('points the profile link at the account the page names, not the configured one', async () => {
+		const [post] = await tiktokSourceProvider.read(
+			source,
+			answering(embed([video(NEWEST, { authorUniqueId: 'renamed' })]))
+		);
+
+		expect(post?.author?.profileUrl).toBe('https://www.tiktok.com/@renamed');
 	});
 
 	it('puts a pinned video where its date says, not where TikTok listed it', async () => {
@@ -280,18 +406,82 @@ describe('when the page cannot be read', () => {
 		);
 	});
 
-	it('says which two things an unreadable page could mean', async () => {
-		// A missing account and a changed page look identical from here, and one of them is something
-		// the admin can fix — so the message names both rather than guessing.
-		await expect(
-			tiktokSourceProvider.read(source, answering('<html><body>404</body></html>'))
-		).rejects.toThrow(/may not exist, or TikTok may have changed/);
-	});
-
 	it('fails the source rather than the feed', async () => {
 		await expect(
 			tiktokSourceProvider.read(source, answering('<html></html>'))
 		).rejects.toBeInstanceOf(SourceFailure);
+	});
+
+	it('costs nothing extra when the page reads fine', async () => {
+		// The diagnosis is a second request, and it must stay on the failure path. A provider that
+		// asked oEmbed on every refresh would have doubled this reader's request count against an
+		// endpoint that throttles — and no test of the message would have caught it.
+		const context = answering(embed([video(NEWEST)]));
+
+		await tiktokSourceProvider.read(source, context);
+
+		expect(context.urls).toStrictEqual(['https://www.tiktok.com/embed/@someone']);
+	});
+
+	it('says the account does not exist when oEmbed says so', async () => {
+		// Measured: a missing handle answers 400 from the embed page — not 404 — with a state blob that
+		// parses and carries no video list, so the embed response alone cannot tell this apart from a
+		// page whose shape changed. oEmbed is TikTok's own documented endpoint and answers 400 here.
+		await expect(
+			tiktokSourceProvider.read(source, routing(400, '<html></html>', 400))
+		).rejects.toThrow(/TikTok has no account called @someone\./);
+	});
+
+	it('blames the page, not the handle, when oEmbed says the account is there', async () => {
+		// The other half of the same question, and the half an admin must not be sent chasing: there is
+		// nothing to fix in the configuration, so the message has to stop suggesting there is.
+		await expect(
+			tiktokSourceProvider.read(source, routing(200, '<html>no state</html>', 200))
+		).rejects.toThrow(/although the account exists/);
+	});
+
+	it('falls back to naming both causes when oEmbed cannot be reached either', async () => {
+		// The old hedge, kept for exactly this case. An unavailable diagnosis is not grounds for
+		// asserting either answer, and claiming the account is missing because a second endpoint was
+		// down would send an admin to delete a working source.
+		await expect(tiktokSourceProvider.read(source, routing(503, '', 503))).rejects.toThrow(
+			/may not exist, or TikTok may have changed/
+		);
+	});
+
+	it('does not let a failed diagnosis replace the failure', async () => {
+		// `diagnose` makes a request on a path that is already failing. If that request throws, the
+		// throw must not escape — it would reach the orchestrator as something other than a
+		// `SourceFailure`, whose message the orchestrator deliberately refuses to render.
+		const context: SourceContext = {
+			store: memoryStore(),
+			fetch: (url: string) =>
+				url.startsWith('https://www.tiktok.com/oembed')
+					? Promise.reject(new Error('network is down'))
+					: Promise.resolve(new Response('<html></html>', { status: 200 }))
+		};
+
+		await expect(tiktokSourceProvider.read(source, context)).rejects.toBeInstanceOf(SourceFailure);
+	});
+});
+
+describe('the expiry a signed cdn url states', () => {
+	it('is the x-expires query parameter', () => {
+		expect(expiryOf('https://cdn.example/a.image?dr=1&x-expires=1791622800&x-signature=abc')).toBe(
+			1_791_622_800
+		);
+	});
+
+	it.each([
+		['a url with no expiry', 'https://cdn.example/a.image'],
+		['something that is not a url', 'not a url'],
+		['a non-numeric expiry', 'https://cdn.example/a.image?x-expires=soon'],
+		// Both ends of the plausibility window. A value outside it parsed but was not a second count
+		// somebody meant, and treating it as one would drop a live picture or keep a dead one forever.
+		['an expiry before TikTok existed', 'https://cdn.example/a.image?x-expires=1'],
+		['an expiry implausibly far out', 'https://cdn.example/a.image?x-expires=999999999999']
+	])('is undefined for %s', (_case, url) => {
+		expect(expiryOf(url)).toBeUndefined();
 	});
 });
 

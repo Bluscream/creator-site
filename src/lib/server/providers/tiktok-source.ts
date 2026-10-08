@@ -12,6 +12,33 @@
  * which is why every field is optional and a shape it does not recognise fails the source rather
  * than the whole feed.
  *
+ * ### Everything else that was tried, and what it answered
+ *
+ * Worth recording, because each of these reads like the obvious answer and four of them have a
+ * README saying they work:
+ *
+ * | route | answer |
+ * | --- | --- |
+ * | `api/post/item_list` — what the profile page's own client calls | **200 with an empty body.** It wants `X-Bogus`/`msToken`, which are computed by TikTok's own obfuscated browser script from a device fingerprint. An empty 200 is the rejection |
+ * | `tiktok.com/@handle` — the profile page | 200, and its `__UNIVERSAL_DATA_FOR_REHYDRATION__` carries the *user* and no video list. The posts are no longer server-rendered, which is why the client signs a request for them |
+ * | oEmbed on a profile url | 200, and describes the profile — no video list. Useful, but only for the question {@link diagnose} asks it |
+ * | `embed/v2/@handle`, `node/share/user/@handle` | 400 and 403 |
+ * | GrayJay's official TikTok plugin | still tagged `wip`, still builds a `CustomWindow`/`CustomDocument` browser emulation to run TikTok's own page scripts, and its manifest now declares `authentication` with a `sessionid` cookie — so it wants a signed-in TikTok account, which a public site must not carry |
+ * | GrayJay's unofficial TikTok plugin | still configured only for `localhost:3002` and the author's own LAN address |
+ * | the maintained npm scraper | fails with "Empty response" after ten retries, because it calls `item_list`. It also pulls a native addon and an unmaintained crypto library |
+ * | RSSHub's public instance | 403, self-host only — the same shape of dependency as the dead bridge host this project replaced |
+ *
+ * So the embed page is not a shortcut past a better option; it is the only unauthenticated route
+ * that answers the question at all. It needs no browser user agent — a plain `node` one is served
+ * the same page — which is the one piece of good news in that table.
+ *
+ * ### It returns eleven videos, and there is no second page
+ *
+ * Measured against an account with fifty-three. The embed's "load more" is the signed `item_list`
+ * call above, so a page cursor is not something this can be given. Eleven is more than a feed row
+ * shows and the orchestrator merges several sources anyway, so this is a ceiling rather than a bug —
+ * but it is a real limit and not one to discover from a short feed.
+ *
  * ### Three things measured against the live page, each of which would be a bug if assumed
  *
  * 1. **A video id is bigger than a JavaScript number, and the obvious shift is worse than that.**
@@ -27,11 +54,17 @@
  *    date is what fixes it — a creator's feed ordered by what they happened to pin would look
  *    broken — which is the second job the id's timestamp does.
  *
- * ### The cover images expire
+ * ### The cover images expire, and they say when
  *
- * Every `coverUrl` is signed, with an `x-expires` about two days out. Nothing here can change that,
- * and it is a reason not to cache these posts for longer than that: a stale entry would render with
- * every picture broken, which looks worse than a feed that is briefly behind.
+ * Every `coverUrl` is signed, with an `x-expires` about two days out — and that is the url's own
+ * query parameter, so the expiry is a fact to read rather than a lifetime to assume. {@link expiryOf}
+ * takes it, which is what `Media.expiresAt` exists for: a stale post then keeps its title, its link
+ * and its date and loses only the picture that has actually stopped working. {@link imageTtl} stays
+ * as the coarse fallback for a cover url that carries no expiry at all.
+ *
+ * The *avatar* is signed the same way and is deliberately not taken. `Actor` has nowhere to put an
+ * expiry, so a cached post would hold an avatar url that 404s with nothing able to notice — the
+ * profile url is taken instead, which is unsigned and permanent.
  */
 
 import { z } from 'zod';
@@ -69,6 +102,19 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const SNOWFLAKE = /^\d{1,20}$/;
 
 /**
+ * The window a unix-seconds value has to land in to be believed.
+ *
+ * Shared by the id's derived timestamp and the cover url's `x-expires`, because the question is the
+ * same both times — is this a second count somebody meant, or a number that merely parsed. The floor
+ * is before TikTok existed and the ceiling is far enough out that no real signature reaches it.
+ */
+const EPOCH_FLOOR = 1_400_000_000;
+const EPOCH_CEILING = 4_000_000_000;
+
+/** The documented endpoint, asked one question only. See {@link diagnose}. */
+const OEMBED = 'https://www.tiktok.com/oembed';
+
+/**
  * As much of the embed state as this reads.
  *
  * Every field optional, because this is scraped rather than promised: a page that drops one should
@@ -82,6 +128,15 @@ const videoSchema = z
 		originCoverUrl: z.string().optional(),
 		authorUniqueId: z.string().optional(),
 
+		// The cover's pixel dimensions, which the page states per video rather than per account —
+		// these feeds mix portrait and the occasional landscape, so one assumed ratio reflows.
+		width: z.number().optional(),
+		height: z.number().optional(),
+
+		// The only engagement number the page carries. Taken because `ContentPiece.views` exists and
+		// this was being dropped on the floor.
+		playCount: z.number().optional(),
+
 		// A video the account holder has made private is still listed, and its page is not readable.
 		privateItem: z.boolean().optional()
 	})
@@ -94,6 +149,8 @@ const pageSchema = z
 	.object({
 		videoList: z.array(videoSchema).optional(),
 		userInfo: z
+			// `avatarThumbUrl` sits beside these and is deliberately not read: it is signed and expires,
+			// and `Actor` has nowhere to record that. See the module comment.
 			.object({ uniqueId: z.string().optional(), nickname: z.string().optional() })
 			.loose()
 			.optional()
@@ -152,9 +209,39 @@ export function postedAt(id: string): string | null {
 
 	// A shifted id that lands before TikTok existed is not a timestamp, which is the signal that the
 	// id is not a snowflake at all rather than that the video is old.
-	if (seconds < 1_400_000_000 || seconds > 4_000_000_000) return null;
+	if (!plausible(seconds)) return null;
 
 	return new Date(seconds * 1000).toISOString();
+}
+
+/** Whether a number is a unix-seconds value somebody meant. See {@link EPOCH_FLOOR}. */
+function plausible(seconds: number): boolean {
+	return seconds >= EPOCH_FLOOR && seconds <= EPOCH_CEILING;
+}
+
+/**
+ * When a signed cdn url stops working, in unix seconds, or undefined.
+ *
+ * TikTok puts the expiry in the url it signs, as `x-expires`, so this is the url stating its own
+ * lifetime rather than this module guessing one. Read with `URL` rather than a regex because that is
+ * what decodes the query string correctly, and undefined for anything that is not a plausible second
+ * count — an unreadable expiry has to mean "no expiry known" and fall back to {@link imageTtl},
+ * since treating it as already-expired would drop every picture on the page.
+ */
+export function expiryOf(url: string): number | undefined {
+	let raw: string | null;
+
+	try {
+		raw = new URL(url).searchParams.get('x-expires');
+	} catch {
+		return undefined;
+	}
+
+	if (raw === null || !/^\d{1,12}$/.test(raw)) return undefined;
+
+	const seconds = Number(raw);
+
+	return plausible(seconds) ? seconds : undefined;
 }
 
 /** The one state entry that holds a video list. */
@@ -204,20 +291,12 @@ export const tiktokSourceProvider: PostsSourceProvider = {
 			`https://www.tiktok.com/embed/@${encodeURIComponent(handle)}`
 		);
 
-		if (!response.ok) {
-			throw new SourceFailure(`TikTok answered ${String(response.status)} for @${handle}.`);
-		}
+		// A missing account answers 400 here rather than 404, with a state blob that parses and holds
+		// no video list — so a bad status and an unreadable page are the same situation and are asked
+		// about together rather than reported as two different problems.
+		const page = response.ok ? pageOf(stateIn(await body(response))) : null;
 
-		const page = pageOf(stateIn(await body(response)));
-
-		// Reached both for an account that does not exist and for a page TikTok has changed the shape
-		// of. Worth saying which two things it could be, because one is fixable by the admin and the
-		// other is not.
-		if (page === null) {
-			throw new SourceFailure(
-				`Could not read @${handle}'s videos. The account may not exist, or TikTok may have changed the page.`
-			);
-		}
+		if (page === null) throw new SourceFailure(await diagnose(handle, response.status, context));
 
 		const author = page.userInfo?.nickname ?? page.userInfo?.uniqueId ?? handle;
 
@@ -269,17 +348,68 @@ function toPost(
 	// would sink to the end of the feed where it would look like the oldest thing the account has.
 	if (posted === null) return null;
 
+	// `playAddr` is deliberately unused: it is a signed link straight to the video file, which is
+	// not what a feed row links to and would not survive being cached anyway.
+	const cover = video.coverUrl ?? video.originCoverUrl;
+	const profile = `https://www.tiktok.com/@${encodeURIComponent(owner)}`;
+
 	return buildPost(source, {
 		id,
 		kind: 'video',
-		url: `https://www.tiktok.com/@${encodeURIComponent(owner)}/video/${encodeURIComponent(id)}`,
+		url: `${profile}/video/${encodeURIComponent(id)}`,
 		title: headline(desc),
 		excerpt: desc,
+		image: cover,
 
-		// `playAddr` is deliberately unused: it is a signed link straight to the video file, which is
-		// not what a feed row links to and would not survive being cached anyway.
-		image: video.coverUrl ?? video.originCoverUrl,
+		// The url's own `x-expires`, not a lifetime assumed for the platform. Undefined where it has
+		// none, which leaves the provider's coarse `imageTtl` to cover it.
+		imageExpiresAt: cover === undefined ? undefined : expiryOf(cover),
+
+		// The cover is a frame of the video, so the video's dimensions are the cover's.
+		imageWidth: video.width,
+		imageHeight: video.height,
 		publishedAt: posted,
-		author
+		author,
+
+		// The unsigned, permanent half of the author's identity. The avatar beside it is signed and
+		// expires, and nothing downstream could notice — see the module comment.
+		authorProfileUrl: profile,
+		views: video.playCount
 	});
+}
+
+/**
+ * Why the embed page could not be read, as a sentence for an admin.
+ *
+ * The hedge this replaces — "the account may not exist, or TikTok may have changed the page" — named
+ * two causes without saying which, and one of them is the admin's to fix while the other is nobody's.
+ * oEmbed answers it: it is TikTok's own documented endpoint, it needs no key, and it returns 400 for
+ * a handle that does not exist and 200 with the profile's details for one that does.
+ *
+ * One extra request, only on the failure path, so the working case still costs a single GET. If
+ * oEmbed cannot be reached either, the original hedge is the honest answer and is what comes back.
+ */
+async function diagnose(handle: string, status: number, context: SourceContext): Promise<string> {
+	const url = `${OEMBED}?${new URLSearchParams({ url: `https://www.tiktok.com/@${handle}` }).toString()}`;
+
+	let exists: boolean | null = null;
+
+	try {
+		const response = await context.fetch(url);
+
+		// Only the status is read. The body would do as well, but it is somebody else's JSON on a path
+		// that is already reporting a failure, and the status is the whole signal.
+		if (response.status === 200) exists = true;
+		else if (response.status === 400 || response.status === 404) exists = false;
+	} catch {
+		// Left null. A diagnosis that fails is not a failure worth replacing the real one with.
+	}
+
+	if (exists === false) return `TikTok has no account called @${handle}.`;
+
+	if (exists === true) {
+		return `TikTok answered ${String(status)} for @${handle}'s embed page and its videos could not be read, although the account exists. TikTok may have changed the page.`;
+	}
+
+	return `Could not read @${handle}'s videos (TikTok answered ${String(status)}). The account may not exist, or TikTok may have changed the page.`;
 }

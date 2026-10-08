@@ -125,6 +125,17 @@ export interface RawPost {
 	 */
 	readonly imageExpiresAt?: number | undefined;
 
+	/**
+	 * The image's pixel dimensions, where the platform states them.
+	 *
+	 * Both or neither: a width without a height gives a layout nothing to reserve, so a provider that
+	 * has only one of them should hand over neither. Passed through to {@link Media} so a row can size
+	 * the box before the picture arrives — these feeds are overwhelmingly portrait video, and a grid
+	 * that assumes landscape reflows every thumbnail as it loads.
+	 */
+	readonly imageWidth?: number | undefined;
+	readonly imageHeight?: number | undefined;
+
 	/** The author's avatar, where the platform gives one. */
 	readonly authorAvatarUrl?: string | null | undefined;
 
@@ -182,7 +193,8 @@ export function buildPost(source: ResolvedSource, raw: RawPost): ContentPiece | 
 						{
 							url: picture,
 							kind: 'image' as const,
-							...optional('expiresAt', raw.imageExpiresAt)
+							...optional('expiresAt', raw.imageExpiresAt),
+							...dimensions(raw)
 						}
 					]
 	};
@@ -199,6 +211,22 @@ function count(value: number | null | undefined): number | null {
 	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
 
 	return Math.round(value);
+}
+
+/**
+ * The image's dimensions, or nothing at all.
+ *
+ * All or nothing, because one of the two is of no use to a layout: reserving the right width with
+ * the wrong height is the reflow this field exists to prevent. Each is put through {@link count}
+ * first, so a platform that sends a string, a float or a zero contributes neither.
+ */
+function dimensions(raw: RawPost): { readonly width: number; readonly height: number } | object {
+	const width = count(raw.imageWidth);
+	const height = count(raw.imageHeight);
+
+	if (width === null || height === null || width === 0 || height === 0) return {};
+
+	return { width, height };
 }
 
 /**
