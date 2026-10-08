@@ -35,3 +35,6 @@ project.inlang/cache/
 
 # Working notes and design documents kept beside the code but not published
 .references/
+
+# The browser tests build and serve here; see scripts/e2e-server.js.
+.e2e-data/
