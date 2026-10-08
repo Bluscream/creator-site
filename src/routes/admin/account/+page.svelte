@@ -20,10 +20,55 @@
 -->
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Icon from '#lib/components/Icon.svelte';
 	import * as m from '#lib/paraglide/messages.js';
+	import { iconFor, nameFor } from '#lib/platforms.js';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
+
+	/**
+	 * What a capability is called, in the page's language.
+	 *
+	 * A `switch` returning a call rather than a lookup table of functions, because the i18n coverage
+	 * check reads *calls*: a table makes every message in it look dead, and the check then reports
+	 * the catalogue as complete while six strings go unverified.
+	 */
+	function capabilityName(capability: string): string {
+		switch (capability) {
+			case 'sign-in':
+				return m.admin_capability_sign_in();
+			case 'posts':
+				return m.admin_capability_posts();
+			case 'chat':
+				return m.admin_capability_chat();
+			case 'live':
+				return m.admin_capability_live();
+			case 'activity':
+				return m.admin_capability_activity();
+			case 'social':
+				return m.admin_capability_social();
+			default:
+				return capability;
+		}
+	}
+
+	/** How a link was made, in the page's language. */
+	function methodName(method: string): string {
+		switch (method) {
+			case 'token':
+				return m.admin_linked_method_token();
+			case 'login':
+				return m.admin_linked_method_login();
+			default:
+				return m.admin_linked_method_oauth();
+		}
+	}
+
+	/** The platform's own display name, falling back to the id for one the registry does not know. */
+	function platformName(id: string): string {
+		return nameFor({ platform: id }, id);
+	}
 
 	/** A unix-seconds timestamp, in whatever format the viewer's browser prefers. */
 	function when(seconds: number): string {
@@ -75,6 +120,93 @@
 			<a rel="nofollow" href="/auth/{provider.kind}/login?intent=link&next=/admin/account">
 				{m.admin_add_sign_in({ provider: provider.label })}
 			</a>
+		</p>
+	{/each}
+</section>
+
+<section>
+	<h2>{m.admin_linked_accounts()}</h2>
+	<p>{m.admin_linked_accounts_lead()}</p>
+
+	{#if data.connections.length === 0}
+		<p><small>{m.admin_linked_none()}</small></p>
+	{:else}
+		<ul>
+			{#each data.connections as connection (connection.id)}
+				<li data-platform={connection.platform}>
+					<span>
+						<strong>
+							<Icon name={iconFor({ platform: connection.platform })} size={14} />
+							{connection.displayName ?? connection.handle ?? platformName(connection.platform)}
+						</strong>
+						<small>{methodName(connection.method)}</small>
+
+						<!--
+							Only the states worth acting on. A link that is fine says nothing, because a row
+							of reassuring labels is a row nobody reads — and then the one that matters is
+							not noticed either.
+						-->
+						{#if connection.expired}
+							<small>{m.admin_linked_expired()}</small>
+						{:else if connection.refreshable}
+							<small>{m.admin_linked_renews()}</small>
+						{/if}
+
+						{#if connection.shown}
+							<small>{m.admin_linked_shown()}</small>
+						{/if}
+					</span>
+
+					<span class="actions">
+						<form method="POST" action="?/showConnection" use:enhance>
+							<input type="hidden" name="id" value={connection.id} />
+							<!-- The state asked for, not a toggle: a double submission then lands where the
+							     person meant rather than back where it started. -->
+							<input type="hidden" name="shown" value={connection.shown ? 'false' : 'true'} />
+							<button type="submit">
+								{connection.shown ? m.admin_linked_hide() : m.admin_linked_show()}
+							</button>
+						</form>
+
+						<form method="POST" action="?/unlinkConnection" use:enhance>
+							<input type="hidden" name="id" value={connection.id} />
+							<button type="submit">{m.admin_linked_unlink()}</button>
+						</form>
+					</span>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+
+	{#each data.platforms as platform (platform.id)}
+		{@const linked = data.connections.some((entry) => entry.platform === platform.id)}
+
+		<p>
+			<!--
+				A link, not a form: starting the round trip changes nothing here and the visitor is
+				leaving for the platform's own site. `intent=connect` is what writes a credential row
+				rather than another way of signing in.
+
+				Offered even when already linked, because re-authorising is how a lapsed token is fixed
+				and a button that disappeared after the first link would make the fix unfindable.
+			-->
+			<a rel="nofollow" href="/auth/{platform.id}/login?intent=connect&next=/admin/account">
+				{linked
+					? m.admin_relink_account({ platform: platform.label })
+					: m.admin_link_account({ platform: platform.label })}
+			</a>
+
+			<small>
+				{m.admin_linked_serves({
+					capabilities: platform.capabilities.map((entry) => capabilityName(entry)).join(', ')
+				})}
+			</small>
+
+			{#if platform.caveat !== null}
+				<!-- The honest limitations the research turned up, shown where somebody is deciding
+				     whether to link rather than discovered later as a feed that stays empty. -->
+				<small>{platform.caveat}</small>
+			{/if}
 		</p>
 	{/each}
 </section>
@@ -150,6 +282,21 @@
 
 	small {
 		opacity: 0.7;
+	}
+
+	.actions {
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	li[data-platform] strong {
+		display: flex;
+		align-items: center;
+		gap: 0.35em;
+		/* From the platform registry, inlined on the row above. A platform with no colour recorded
+		   falls through to the surrounding ink rather than to one nobody chose. */
+		color: var(--platform-ink, inherit);
 	}
 
 	.notice {

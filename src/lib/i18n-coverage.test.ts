@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { globSync } from 'tinyglobby';
-import { hardcodedStrings, referencedKeys } from '#lib/i18n-coverage.js';
+import { aliasedImports, hardcodedStrings, referencedKeys } from '#lib/i18n-coverage.js';
 import baseCatalogue from '../../messages/en.json' with { type: 'json' };
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -83,6 +83,16 @@ describe('the parser this is built on', () => {
 	it('does not match something that merely ends in m', () => {
 		expect(referencedKeys(['form.chat_empty()', 'stream.nav_home()'])).toEqual(new Set());
 	});
+
+	it('spots the import that would hide every call in a file', () => {
+		expect(
+			aliasedImports(["import * as paraglide from '#lib/paraglide/messages.js';"])
+		).toHaveLength(1);
+	});
+
+	it('is satisfied by the one name the project uses', () => {
+		expect(aliasedImports(["import * as m from '#lib/paraglide/messages.js';"])).toEqual([]);
+	});
 });
 
 /**
@@ -115,6 +125,16 @@ describe('every catalogue key is used', () => {
 		// A glob that matched nothing, or an import style this does not recognise, would otherwise
 		// report the entire catalogue as dead and be ignored for it.
 		expect(used.size).toBeGreaterThan(0);
+	});
+
+	it('imports the catalogue under the one name the scan recognises', () => {
+		// The failure this exists for, which cost nine keys: a file importing the catalogue as
+		// `paraglide` had all of its calls invisible to `referencedKeys`, so its messages were
+		// reported as dead *and* a key it had missed would have been reported as covered. Both
+		// directions of the check were wrong at once, and the output looked plausible.
+		const aliased = aliasedImports(codeFiles.map(read));
+
+		expect(aliased, `the catalogue is \`m\` everywhere:\n${aliased.join('\n')}`).toEqual([]);
 	});
 
 	it('has no key nothing refers to', () => {

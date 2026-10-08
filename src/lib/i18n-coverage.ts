@@ -110,6 +110,11 @@ export function hardcodedStrings(file: string, source: string): readonly Hardcod
  * The cost is that a key reached dynamically, `m[name]()`, is invisible. Nothing does that, and if
  * something ever does it will have to be exempted explicitly, which is the right outcome: a
  * catalogue whose keys are assembled at runtime cannot be checked by anything.
+ *
+ * The other cost was worse and is now checked separately: a file importing the catalogue under any
+ * other name — `import * as paraglide from …` — had every one of its calls invisible here, so the
+ * keys it used were reported as dead and the keys it *missed* were reported as covered. See
+ * {@link aliasedImports}, which refuses the alias rather than trying to follow it.
  */
 export function referencedKeys(sources: readonly string[]): ReadonlySet<string> {
 	const keys = new Set<string>();
@@ -123,4 +128,32 @@ export function referencedKeys(sources: readonly string[]): ReadonlySet<string> 
 	}
 
 	return keys;
+}
+
+/**
+ * The import that would hide a call from {@link referencedKeys}, if there is one.
+ *
+ * `referencedKeys` finds `m.<key>()` and nothing else, so a file that imports the catalogue as
+ * anything but `m` makes its messages invisible: they come out of the coverage check as dead keys,
+ * and a key it genuinely forgot comes out as covered. That happened, with nine keys, which is how
+ * this function came to exist.
+ *
+ * Refusing the alias rather than following it. Matching a second name would mean matching every
+ * name, which is a compiler pass; and there is no reason for a second name — the catalogue is `m`
+ * everywhere in this project, and the one convention is worth more than the freedom.
+ *
+ * @returns each offending import as it was written, for an error message that can be acted on
+ */
+export function aliasedImports(sources: readonly string[]): readonly string[] {
+	const found: string[] = [];
+
+	for (const source of sources) {
+		for (const match of source.matchAll(
+			/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"][^'"]*paraglide\/messages[^'"]*['"]/g
+		)) {
+			if (match[1] !== 'm') found.push(match[0]);
+		}
+	}
+
+	return found;
 }
