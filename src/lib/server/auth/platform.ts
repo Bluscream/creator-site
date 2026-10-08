@@ -29,8 +29,7 @@
  */
 
 import type { LinkMethod } from '#lib/server/db/schema.js';
-import type { ProviderIdentity } from '../accounts.js';
-import type { SignInProvider } from './sign-in-provider.js';
+import type { Grant, SignInProvider } from './sign-in-provider.js';
 
 /**
  * What a linked account can be used for.
@@ -50,8 +49,8 @@ export type Capability = (typeof CAPABILITIES)[number];
  * Checked at the point it is pasted rather than on first use, because the failure modes of a wrong
  * token are a feed that silently stays empty and a live badge that never lights — neither of which
  * points at the form that caused it. A platform that offers `token` linking must therefore be able
- * to answer "whose account is this, and does this token work", which is the same question OAuth's
- * `identify` answers and is why the return type is the same.
+ * to answer "whose account is this, and does this token work" — which is the same thing an OAuth
+ * exchange ends up knowing, and is why both produce a {@link Grant}.
  */
 export interface TokenLink {
 	/**
@@ -64,13 +63,22 @@ export interface TokenLink {
 	readonly hint: string;
 
 	/**
-	 * Whose account the token belongs to.
+	 * Whose account the token belongs to, and what it is good for.
 	 *
-	 * Throws {@link import('./sign-in-provider.js').SignInFailure} when the platform rejects it, with
-	 * a message for the person who pasted it and never the platform's own response body: a rejected
-	 * credential request can echo the credential.
+	 * A {@link Grant} rather than an identity, because a link has to store the scopes the token
+	 * actually carries and when it expires — and the call that answers "whose token is this" is the
+	 * same call that answers both. Returning only the identity would mean validating twice and
+	 * leaving the stored scopes to a guess.
+	 *
+	 * The `accessToken` on the result is the token as it will be stored, which is not always the
+	 * string that was passed in: a paste picks up whitespace, and the trimmed value is the one that
+	 * was proven to work.
+	 *
+	 * Throws a `SignInFailure` when the platform rejects it, with a message for the person who pasted
+	 * it and never the platform's own response body — a rejected credential request can echo the
+	 * credential.
 	 */
-	verify(token: string): Promise<ProviderIdentity>;
+	verify(token: string): Promise<Grant>;
 }
 
 /** One platform an account can be linked to. */

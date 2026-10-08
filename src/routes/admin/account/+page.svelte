@@ -208,6 +208,39 @@
 				<small>{platform.caveat}</small>
 			{/if}
 		</p>
+
+		{#if platform.tokenHint !== null}
+			<!--
+				The escape hatch, in a `<details>` rather than beside the button: OAuth is the better
+				route everywhere it works, and a visible paste field invites somebody to use it when
+				they did not need to. `type="password"` so the credential is not left on screen, and
+				`autocomplete="off"` so no password manager offers to keep it.
+			-->
+			<details>
+				<summary>{m.admin_link_token({ platform: platform.label })}</summary>
+
+				<form method="POST" action="?/linkToken" use:enhance>
+					<input type="hidden" name="platform" value={platform.id} />
+
+					<label>
+						{m.admin_link_token_label()}
+						<input
+							type="password"
+							name="token"
+							required
+							autocomplete="off"
+							spellcheck="false"
+							autocapitalize="off"
+						/>
+					</label>
+
+					<small>{platform.tokenHint}</small>
+					<small>{m.admin_link_token_warning()}</small>
+
+					<button type="submit">{m.admin_link_token_submit()}</button>
+				</form>
+			</details>
+		{/if}
 	{/each}
 </section>
 
@@ -297,6 +330,31 @@
 		/* From the platform registry, inlined on the row above. A platform with no colour recorded
 		   falls through to the surrounding ink rather than to one nobody chose. */
 		color: var(--platform-ink, inherit);
+	}
+
+	details {
+		margin: 0.5rem 0 1rem;
+	}
+
+	details form {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	details label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		width: 100%;
+		max-width: 28rem;
+	}
+
+	details input {
+		font: inherit;
+		padding: 0.4rem 0.5rem;
 	}
 
 	.notice {

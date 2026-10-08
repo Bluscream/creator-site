@@ -20,8 +20,11 @@
 import { fail } from '@sveltejs/kit';
 import { identitiesOf, unlinkIdentity } from '#lib/server/accounts.js';
 import { requireSignIn } from '#lib/server/auth/guard.js';
+import { keepGrant } from '#lib/server/auth/flow.js';
 import { offeredMethods } from '#lib/server/auth/platform.js';
-import { linkablePlatforms } from '#lib/server/auth/platform-registry.js';
+import { accountPlatform, linkablePlatforms } from '#lib/server/auth/platform-registry.js';
+import { SignInFailure } from '#lib/server/auth/sign-in-provider.js';
+import { log } from '#lib/server/log.js';
 import { signInProviders } from '#lib/server/auth/sign-in-registry.js';
 import { connectionsOf, setShown, unlink } from '#lib/server/connections.js';
 import {
@@ -69,7 +72,12 @@ export const load: PageServerLoad = ({ cookies, locals, url }) => {
 			label: entry.label,
 			capabilities: entry.capabilities,
 			caveat: entry.caveat,
-			methods: offeredMethods(entry)
+			methods: offeredMethods(entry),
+
+			// What to paste and where to get it, for the platforms that take a token. Null rather than
+			// absent so the template's check is one thing; the hint is platform-specific by necessity
+			// — "a Twitch user token from the CLI" and "a Google API key" are not one instruction.
+			tokenHint: offeredMethods(entry).includes('token') ? (entry.token?.hint ?? null) : null
 		}))
 	};
 };
@@ -106,6 +114,55 @@ export const actions: Actions = {
 				: revokeAll(principal.userId, { except: token });
 
 		return { ended };
+	},
+
+	/**
+	 * Links an account from a token somebody pasted.
+	 *
+	 * The only action here that handles a credential, so it is the one with the most to get wrong:
+	 *
+	 * - the token is **verified against the platform before anything is stored**, because the failure
+	 *   modes of a wrong one are a feed that silently stays empty and a live badge that never lights,
+	 *   neither of which points back at this form;
+	 * - the platform comes from the registry, not from the field — a form naming a platform this
+	 *   install does not offer is refused rather than looked up;
+	 * - nothing about the token, not even its length, is logged or returned. The refusal the person
+	 *   sees comes from the platform's own verifier, which is written never to quote the credential.
+	 */
+	linkToken: async ({ locals, request, url }) => {
+		const principal = requireSignIn(locals, url);
+		const data = await request.formData();
+		const id = field(data, 'platform');
+		const token = field(data, 'token');
+
+		if (id === null || token === null) return fail(400, { error: 'no_token' });
+
+		const platform = accountPlatform(id);
+
+		// `accountPlatform` already excludes what this install cannot link, so one lookup answers
+		// both "does this exist" and "is it configured".
+		if (platform === null || !platform.methods.includes('token') || platform.token === null) {
+			return fail(404, { error: 'no_platform' });
+		}
+
+		if (!platform.usable('token')) return fail(409, { error: 'no_platform' });
+
+		try {
+			const grant = await platform.token.verify(token);
+
+			keepGrant(grant, principal.userId, 'token');
+		} catch (cause) {
+			// The verifier's own message, which is written for the person who pasted it. Anything else
+			// is a bug or the network, and its message could carry anything — including the request
+			// that was rejected — so it is replaced rather than shown.
+			if (cause instanceof SignInFailure) return fail(400, { error: cause.message });
+
+			log().error({ platform: id, err: messageOf(cause) }, 'linking by token failed');
+
+			return fail(502, { error: 'link_failed' });
+		}
+
+		return { linked: true };
 	},
 
 	/** Shows or hides a linked account on the public site. */
@@ -153,6 +210,17 @@ export const actions: Actions = {
 			: fail(409, { error: 'last_identity' });
 	}
 };
+
+/**
+ * An unknown throwable's message, for a log line.
+ *
+ * `String(cause)` on an arbitrary value can run a `toString` the thrower controls, and an `Error`
+ * subclass can carry a response body in its message — so this takes the message only from a real
+ * `Error` and names the type otherwise.
+ */
+function messageOf(cause: unknown): string {
+	return cause instanceof Error ? cause.name : typeof cause;
+}
 
 /**
  * One form field, as a string.

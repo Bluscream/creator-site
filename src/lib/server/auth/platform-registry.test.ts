@@ -15,9 +15,16 @@ import type { AccountPlatform } from './platform.js';
 
 /** The credentials the Discord half reads. See `sign-in-registry.test.ts` for the shape. */
 const env = vi.hoisted(() => {
-	const state: { id: string | undefined; secret: string | undefined } = {
+	const state: {
+		id: string | undefined;
+		secret: string | undefined;
+		twitchId: string | undefined;
+		twitchSecret: string | undefined;
+	} = {
 		id: 'client-id',
-		secret: 'client-secret'
+		secret: 'client-secret',
+		twitchId: undefined,
+		twitchSecret: undefined
 	};
 
 	return state;
@@ -29,6 +36,15 @@ vi.mock('$app/env/private', () => ({
 	},
 	get DISCORD_CLIENT_SECRET() {
 		return env.secret;
+	},
+
+	// Mocked, not read. A developer with real Twitch credentials in their environment would
+	// otherwise have a second platform appear in these assertions on their machine and not in CI.
+	get TWITCH_CLIENT_ID() {
+		return env.twitchId;
+	},
+	get TWITCH_CLIENT_SECRET() {
+		return env.twitchSecret;
 	}
 }));
 
@@ -217,6 +233,67 @@ describe('the sign-in list, which is derived from this one', () => {
 		} finally {
 			configured('client-id', 'client-secret');
 		}
+	});
+});
+
+describe('a second configured platform', () => {
+	/** Twitch configured as well as Discord, put back afterwards. */
+	function withTwitch(body: () => void): void {
+		env.twitchId = 'twitch-client-id';
+		env.twitchSecret = 'twitch-client-secret';
+
+		try {
+			body();
+		} finally {
+			env.twitchId = undefined;
+			env.twitchSecret = undefined;
+		}
+	}
+
+	it('appears only once it is configured', () => {
+		expect(accountPlatform('twitch')).toBeNull();
+
+		withTwitch(() => {
+			expect(accountPlatform('twitch')).not.toBeNull();
+		});
+	});
+
+	it('offers both of its methods, oauth first', () => {
+		withTwitch(() => {
+			expect(offeredMethods(platformNamed('twitch'))).toEqual(['oauth', 'token']);
+		});
+	});
+
+	it('carries a verifier and a hint for the paste field', () => {
+		withTwitch(() => {
+			const twitch = platformNamed('twitch');
+
+			expect(twitch.token).not.toBeNull();
+			expect(twitch.token?.hint).toMatch(/token/i);
+		});
+	});
+
+	it('does not claim chat, which nothing here reads yet', () => {
+		// Claiming it would put a capability on the account page that leads nowhere, and would mean
+		// asking the creator to approve a scope nothing uses.
+		withTwitch(() => {
+			expect(supports(platformNamed('twitch'), 'chat')).toBe(false);
+		});
+	});
+
+	it('joins the sign-in list without being added to a second array', () => {
+		// The payoff for deriving one list from the other: registering the platform was the whole
+		// change, and signing in with it followed.
+		withTwitch(() => {
+			expect(signInProviders().map((provider) => provider.kind)).toEqual(['discord', 'twitch']);
+		});
+	});
+
+	it('is offered for the capabilities it declares, beside the other platform', () => {
+		withTwitch(() => {
+			expect(platformsFor('social').map((entry) => entry.id)).toEqual(['discord', 'twitch']);
+			expect(platformsFor('posts').map((entry) => entry.id)).toEqual(['twitch']);
+		});
 	});
 });
 

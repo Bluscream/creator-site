@@ -13,6 +13,7 @@
  */
 
 import { discordPlatform } from './discord-platform.js';
+import { twitchPlatform } from './twitch-platform.js';
 import { linkable, supports } from './platform.js';
 import type { AccountPlatform, Capability } from './platform.js';
 
@@ -25,7 +26,7 @@ import type { AccountPlatform, Capability } from './platform.js';
  * there. Which also means a probe cannot tell from the shape of the site which platforms the
  * operator has set up.
  */
-const PLATFORMS: readonly AccountPlatform[] = [discordPlatform()];
+const PLATFORMS: readonly AccountPlatform[] = [discordPlatform(), twitchPlatform()];
 
 /** Every platform, including the ones this installation cannot link. */
 export function accountPlatforms(): readonly AccountPlatform[] {

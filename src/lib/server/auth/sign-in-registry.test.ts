@@ -16,9 +16,16 @@ import { describe, expect, it, vi } from 'vitest';
  * from "present and undefined", and a test that unsets one is doing the second.
  */
 const env = vi.hoisted(() => {
-	const state: { id: string | undefined; secret: string | undefined } = {
+	const state: {
+		id: string | undefined;
+		secret: string | undefined;
+		twitchId: string | undefined;
+		twitchSecret: string | undefined;
+	} = {
 		id: 'client-id',
-		secret: 'client-secret'
+		secret: 'client-secret',
+		twitchId: undefined,
+		twitchSecret: undefined
 	};
 
 	return state;
@@ -30,6 +37,15 @@ vi.mock('$app/env/private', () => ({
 	},
 	get DISCORD_CLIENT_SECRET() {
 		return env.secret;
+	},
+
+	// Mocked, not read. A developer with real Twitch credentials in their environment would
+	// otherwise have a second platform appear in these assertions on their machine and not in CI.
+	get TWITCH_CLIENT_ID() {
+		return env.twitchId;
+	},
+	get TWITCH_CLIENT_SECRET() {
+		return env.twitchSecret;
 	}
 }));
 

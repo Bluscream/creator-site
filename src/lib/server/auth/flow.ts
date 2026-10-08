@@ -42,6 +42,7 @@ import type { Principal } from '../session.js';
 import { SESSION_COOKIE, SESSION_TTL, issue, revoke, sameToken } from '../session.js';
 import { log } from '../log.js';
 import { registrationPolicy, roleFloorFor } from './policy.js';
+import type { LinkMethod } from '../db/schema.js';
 import { link as linkConnection } from '../connections.js';
 import type { LinkRefusal } from '../connections.js';
 import { SignInFailure } from './sign-in-provider.js';
@@ -343,15 +344,33 @@ function connect(grant: Grant, pending: Pending, signedIn: Principal | null): Pr
 		throw new SignInFailure('That request was started by a different account. Please try again.');
 	}
 
+	keepGrant(grant, signedIn.userId, 'oauth');
+
+	return signedIn;
+}
+
+/**
+ * Writes a grant as a linked account, whichever method produced it.
+ *
+ * Shared by the OAuth callback and the paste-a-token form, because the *credential* half of linking
+ * is identical once a grant exists — the same row, the same refusals, the same encryption. Only the
+ * ceremony before it differs: a round trip with a state cookie, or a form field.
+ *
+ * `method` is recorded rather than inferred, because it changes what the account page can say: an
+ * OAuth link can be re-authorised with a button, a pasted one has to be pasted again.
+ *
+ * @throws {SignInFailure} with a message for whoever asked for the link
+ */
+export function keepGrant(grant: Grant, userId: string, method: LinkMethod): void {
 	const { identity } = grant;
 	const result = linkConnection({
-		userId: signedIn.userId,
+		userId,
 		platform: identity.provider,
 		platformAccountId: identity.providerUserId,
 		handle: identity.name ?? null,
 		displayName: identity.name ?? null,
 		avatarUrl: identity.avatarUrl ?? null,
-		method: 'oauth',
+		method,
 		accessToken: grant.accessToken,
 		refreshToken: grant.refreshToken,
 		expiresAt: grant.expiresAt,
@@ -359,12 +378,11 @@ function connect(grant: Grant, pending: Pending, signedIn: Principal | null): Pr
 	});
 
 	if (typeof result === 'string') {
-		log().warn({ platform: identity.provider, reason: result }, 'link refused');
+		// The reason, never the grant: it holds the token.
+		log().warn({ platform: identity.provider, method, reason: result }, 'link refused');
 
 		throw new SignInFailure(refusalMessage(result));
 	}
-
-	return signedIn;
 }
 
 /** What to tell somebody whose link was refused. */
