@@ -80,6 +80,15 @@ export interface Connection {
 
 /** What a provider needs to call a platform as this account. */
 export interface Credential {
+	/**
+	 * The row, so a caller that refreshes the token can write the new one back.
+	 *
+	 * Here rather than looked up a second time because the two would be racing: between reading a
+	 * credential and storing its replacement, "the most recent connection for this platform" can be a
+	 * different row, and the refreshed token would land on the wrong one.
+	 */
+	readonly id: string;
+
 	readonly platform: string;
 	readonly platformAccountId: string;
 	readonly handle: string | null;
@@ -259,6 +268,7 @@ export function credentialFor(platform: string): Credential | null {
 
 	try {
 		return {
+			id: row.id,
 			platform: row.platform,
 			platformAccountId: row.platformAccountId,
 			handle: row.handle,

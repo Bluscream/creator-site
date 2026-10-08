@@ -62,6 +62,7 @@ const { credentialsFor } = await import('./credentials.js');
 /** A stored credential as `connections.credentialFor` returns one. */
 function connection(overrides: Partial<StoredCredential> = {}): StoredCredential {
 	return {
+		id: 'a-connection-id',
 		platform: 'twitch',
 		platformAccountId: '12345',
 		handle: 'somebody',

@@ -51,9 +51,9 @@ export interface Authorization {
  * check that binds the response to this browser is `./flow.ts`'s, and this is how its answer reaches
  * the exchange.
  */
-export type { Callback } from './oauth2.js';
+export type { Callback, OAuth2Tokens } from './oauth2.js';
 
-import type { Callback } from './oauth2.js';
+import type { Callback, OAuth2Tokens } from './oauth2.js';
 
 /** One way of signing in. */
 export interface SignInProvider {
@@ -105,6 +105,22 @@ export interface SignInProvider {
 	 * would present the same authorization code twice, which every provider rejects the second time.
 	 */
 	grant?(callback: Callback): Promise<Grant>;
+
+	/**
+	 * A stored refresh token, exchanged for a fresh access token.
+	 *
+	 * Optional, and its absence is a real answer twice over: a platform that stores no token has
+	 * nothing to refresh, and a token somebody pasted by hand has no refresh token by definition —
+	 * nobody can mint one from an access token. Those links lapse and have to be pasted again, which
+	 * is the cost of the method.
+	 *
+	 * Without this, a Twitch link stops working about four hours after it is made, and the only sign
+	 * is a feed that quietly stops filling. That is the failure mode this exists to prevent.
+	 *
+	 * Throws {@link SignInFailure} when the platform refuses, under the same rule as the rest of this
+	 * seam: never the provider's response body, because the request carries the client secret.
+	 */
+	refresh?(refreshToken: string): Promise<OAuth2Tokens>;
 }
 
 /**

@@ -26,6 +26,7 @@ import { accountPlatform, linkablePlatforms } from '#lib/server/auth/platform-re
 import { SignInFailure } from '#lib/server/auth/sign-in-provider.js';
 import { log } from '#lib/server/log.js';
 import { signInProviders } from '#lib/server/auth/sign-in-registry.js';
+import { platformToken } from '#lib/server/auth/token.js';
 import { connectionsOf, setShown, unlink } from '#lib/server/connections.js';
 import {
 	SESSION_COOKIE,
@@ -163,6 +164,37 @@ export const actions: Actions = {
 		}
 
 		return { linked: true };
+	},
+
+	/**
+	 * Checks a linked account, renewing its token first if that is what it needs.
+	 *
+	 * The button exists because the alternative way to find out is to wait for a feed to stop
+	 * filling. A linked Twitch account's access token lasts about four hours, so a link made
+	 * yesterday is almost certainly stale, and nothing on the page could previously tell the
+	 * difference between stale-but-renewable and genuinely broken.
+	 *
+	 * Reports only whether there is a usable token now. Never the token, and never which of the
+	 * several failures it was: `platformToken` logs those where they happen, and a creator's next
+	 * step is the same for all of them.
+	 */
+	checkConnection: async ({ locals, request, url }) => {
+		const principal = requireSignIn(locals, url);
+		const id = field(await request.formData(), 'platform');
+
+		if (id === null) return fail(400, { error: 'no_platform' });
+
+		// Checked against the registry rather than trusted from the form, as everywhere else here: the
+		// value arrived from outside the trust boundary whatever the page believes it rendered.
+		if (accountPlatform(id) === null) return fail(404, { error: 'no_platform' });
+
+		// Scoped to the owner before anything is read: an id from a form is not a claim about whose
+		// connection it is.
+		if (!connectionsOf(principal.userId).some((entry) => entry.platform === id)) {
+			return fail(404, { error: 'no_connection' });
+		}
+
+		return { working: (await platformToken(id)) !== null };
 	},
 
 	/** Shows or hides a linked account on the public site. */

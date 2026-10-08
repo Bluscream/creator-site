@@ -41,7 +41,7 @@
 import { z } from 'zod';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from '$app/env/private';
 import type { ProviderIdentity } from '../accounts.js';
-import { OAuth2Failure, authorizationUrl, exchangeCode } from './oauth2.js';
+import { OAuth2Failure, authorizationUrl, exchangeCode, refreshTokens } from './oauth2.js';
 import type { Callback, OAuth2App } from './oauth2.js';
 import { SignInFailure } from './sign-in-provider.js';
 import type { Authorization, Grant, SignInProvider } from './sign-in-provider.js';
@@ -134,7 +134,24 @@ export function twitchSignIn(): SignInProvider {
 
 		identify: async (callback) => (await exchange(callback)).identity,
 
-		grant: async (callback) => exchange(callback)
+		grant: async (callback) => exchange(callback),
+
+		refresh: async (refreshToken) => {
+			try {
+				return await refreshTokens(app(), refreshToken);
+			} catch (cause) {
+				if (cause instanceof SignInFailure) throw cause;
+
+				// A refused refresh is the end of the link: the creator revoked it, or changed their
+				// password, or it simply aged out. Saying so is what lets the account page ask for a
+				// re-link instead of showing a connection that cannot do anything.
+				throw new SignInFailure(
+					cause instanceof OAuth2Failure && cause.kind === 'refused'
+						? 'Twitch would not renew that link. It has to be connected again.'
+						: 'Twitch could not be reached. Try again in a moment.'
+				);
+			}
+		}
 	};
 }
 

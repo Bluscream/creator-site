@@ -85,7 +85,18 @@
 
 {#if form !== null}
 	<p class="notice" role="status">
-		{'error' in form ? m.admin_failed() : m.admin_done()}
+		{#if 'error' in form}
+			{m.admin_failed()}
+		{:else if 'working' in form}
+			<!--
+				A check that ran is a successful action whatever it found, so the generic "Done" would
+				report a link that cannot be used as a success — which is the one answer this button
+				exists to give.
+			-->
+			{form.working ? m.admin_linked_checked_working() : m.admin_linked_checked_broken()}
+		{:else}
+			{m.admin_done()}
+		{/if}
 	</p>
 {/if}
 
@@ -166,6 +177,16 @@
 							<button type="submit">
 								{connection.shown ? m.admin_linked_hide() : m.admin_linked_show()}
 							</button>
+						</form>
+
+						<!--
+							Keyed by platform rather than by row id, because that is what renewing acts on:
+							the credential for a platform, which is the newest link for it. The id is still
+							what the row-scoped actions above use.
+						-->
+						<form method="POST" action="?/checkConnection" use:enhance>
+							<input type="hidden" name="platform" value={connection.platform} />
+							<button type="submit">{m.admin_linked_check()}</button>
 						</form>
 
 						<form method="POST" action="?/unlinkConnection" use:enhance>
